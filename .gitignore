@@ -26,3 +26,8 @@ makecart.js
 makecart.wasm
 makecart.worker.js
 test*.bin
+/.vs
+/msvc/x64/Debug
+/msvc/x64/Release
+/x64/Debug/x16-emulator.exe
+/x64/Debug/x16-emulator.pdb
