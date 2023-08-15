@@ -384,27 +384,6 @@ refresh_layer_properties(const uint8_t layer)
 	props->color_fields_max = (8 >> props->color_depth) - 1;
 }
 
-struct video_sprite_properties
-{
-	int8_t sprite_zdepth;
-	uint8_t sprite_collision_mask;
-
-	int16_t sprite_x;
-	int16_t sprite_y;
-	uint8_t sprite_width_log2;
-	uint8_t sprite_height_log2;
-	uint8_t sprite_width;
-	uint8_t sprite_height;
-
-	bool hflip;
-	bool vflip;
-
-	uint8_t color_mode;
-	uint32_t sprite_address;
-
-	uint16_t palette_offset;
-};
-
 void
 mousegrab_toggle() {
 	mouse_grabbed = !mouse_grabbed;
@@ -487,6 +466,13 @@ refresh_palette() {
 		video_palette.entries[i] = (uint32_t)(r << 16) | ((uint32_t)g << 8) | ((uint32_t)b);
 	}
 	video_palette.dirty = false;
+}
+
+// code source https://github.com/indigodarkwolf/box16
+const uint32_t *
+vera_video_get_palette_argb32(void)
+{
+	return video_palette.entries;
 }
 
 static void
@@ -1372,13 +1358,24 @@ get_and_inc_address(uint8_t sel)
 	return address;
 }
 
+
+//
+// Vera: provice access to sprite properties
+// code source https://github.com/indigodarkwolf/box16
+//
+struct video_sprite_properties *
+video_get_sprite_properties(uint8_t spriteID)
+{
+	return &sprite_properties[spriteID];
+}
+
 //
 // Vera: Internal Video Address Space
 //
 
 uint8_t
 video_space_read(uint32_t address)
-{
+{ 
 	return video_ram[address & 0x1FFFF];
 }
 

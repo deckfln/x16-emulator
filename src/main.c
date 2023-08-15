@@ -53,6 +53,7 @@
 #include "wav_recorder.h"
 #include "testbench.h"
 #include "cartridge.h"
+#include "remoted/remoted.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -133,6 +134,7 @@ bool test_init_complete=false;
 bool headless = false;
 bool testbench = false;
 bool enable_midline = false;
+bool remote_debugger = false;
 
 uint8_t MHZ = 8;
 
@@ -543,6 +545,8 @@ usage()
 	printf("\tis meant mainly for benchmarking, and may not reflect accurate\n");
 	printf("\thardware behavior.\n");
 	printf("-midline-effects\n");
+	printf("-remote-debugger\n");
+	printf("\API based web server running on port :9009\n");
 	printf("\tApproximate mid-line raster effects when changing tile, sprite,\n");
 	printf("\tand palette data. Requires a fast host CPU.\n");
 #ifdef TRACE
@@ -1003,6 +1007,10 @@ main(int argc, char **argv)
 			argc--;
 			argv++;
 			enable_midline = true;
+		} else if (!strcmp(argv[0], "-remote-debugger")) {
+			argc--;
+			argv++;
+			remote_debugger = true;
 		} else {
 			usage();
 		}
@@ -1089,6 +1097,13 @@ main(int argc, char **argv)
 		video_init(window_scale, screen_x_scale, scale_quality);
 	}
 
+	if (remote_debugger) {
+		if (!remoted_open()) {
+			printf("Cannot connect to port :9009!\n");
+			exit(1);
+		}
+	}
+
 	wav_recorder_set_path(wav_path);
 
 	memory_init();
@@ -1120,6 +1135,10 @@ main(int argc, char **argv)
 		cartridge_save_nvram();
 		cartridge_unload();
 	}
+	if (remote_debugger) {
+		remoted_close();
+	}
+
 	files_shutdown();
 
 #ifdef PERFSTAT
@@ -1326,6 +1345,9 @@ emulator_loop(void *param)
 			int dbgCmd = DEBUGGetCurrentStatus();
 			if (dbgCmd > 0) continue;
 			if (dbgCmd < 0) break;
+		}
+		if (remote_debugger) {
+			remoted_getcommand();
 		}
 
 #ifdef PERFSTAT
