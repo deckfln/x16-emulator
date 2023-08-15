@@ -116,13 +116,18 @@ sprite_to_png(struct png_mem_encode *target, uint32_t *bitmap, uint8_t width, ui
 
 	for (y = 0; y < height; ++y) {
 		row_pointers[y] = (png_byte *)(imgBfr + y * bytes_per_row);
-		uint32_t *row   = (uint32_t *)row_pointers[y];
-		uint32_t *color  = bitmap + (width * y);
+		uint8_t *row = (uint8_t *)row_pointers[y];
+		uint32_t *color = bitmap + (width * y);
 		for (x = 0; x < width; ++x) {
-			*(row++) = *(color++);
+			*(row++) = (*color & 0x000000ff);           // A
+			*(row++) = (*color & 0xff000000) >> 24;     // R
+			*(row++) = (*color & 0x00ff0000) >> 16;		// G
+			*(row++) = (*color & 0x0000ff00) >> 8;		// B
+			color++;
 		}
 	}
 	/* Actually write the image data. */
+	png_set_swap_alpha(png_ptr);
 	png_set_rows(png_ptr, info_ptr, row_pointers);
 	png_set_write_fn(png_ptr, target, my_png_write_data, NULL);
 	png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
