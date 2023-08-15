@@ -14,7 +14,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#ifdef _MSC_VER
+#include <SDL2/SDL.h>
+#else
 #include <SDL.h>
+#endif
 #include "glue.h"
 #include "timing.h"
 #include "disasm.h"
@@ -388,8 +392,12 @@ static void DEBUGExecCmd() {
 
 	switch (cmd) {
 		case CMD_DUMP_MEM:
+#ifdef _MSC_VER
+			sscanf_s(line, "%x", &number);
+#else
 			sscanf(line, "%x", &number);
-			addr= number & 0xFFFF;
+#endif
+			addr = number & 0xFFFF;
 			// Banked Memory, RAM then ROM
 			if(addr >= 0xA000) {
 				currentBank= (number & 0xFF0000) >> 16;
@@ -399,15 +407,23 @@ static void DEBUGExecCmd() {
 			break;
 
 		case CMD_DUMP_VERA:
+#ifdef _MSC_VER
+			sscanf_s(line, "%x", &number);
+#else
 			sscanf(line, "%x", &number);
-			addr = number & 0x1FFFF;
+#endif
+			addr        = number & 0x1FFFF;
 			currentData = addr;
 			dumpmode    = DDUMP_VERA;
 			break;
 
 		case CMD_FILL_MEMORY:
 			size = 1;
+#ifdef _MSC_VER
+			sscanf_s(line, "%x %x %d %d", &addr, &number, &size, &incr);
+#else
 			sscanf(line, "%x %x %d %d", &addr, &number, &size, &incr);
+#endif
 
 			if (dumpmode == DDUMP_RAM) {
 				addr &= 0xFFFF;
@@ -443,8 +459,12 @@ static void DEBUGExecCmd() {
 			break;
 
 		case CMD_DISASM:
+#ifdef _MSC_VER
+			sscanf_s(line, "%x", &number);
+#else
 			sscanf(line, "%x", &number);
-			addr= number & 0xFFFF;
+#endif
+			addr = number & 0xFFFF;
 			// Banked Memory, RAM then ROM
 			if(addr >= 0xA000) {
 				currentPCBank= (number & 0xFF0000) >> 16;
@@ -453,7 +473,11 @@ static void DEBUGExecCmd() {
 			break;
 
 		case CMD_SET_BANK:
+#ifdef _MSC_VER
+			sscanf_s(line, "%s %d", reg, (unsigned)sizeof(reg), &number);
+#else
 			sscanf(line, "%s %d", reg, &number);
+#endif
 
 			if(!strcmp(reg, "rom")) {
 				memory_set_rom_bank(number & 0x00FF);
@@ -464,7 +488,11 @@ static void DEBUGExecCmd() {
 			break;
 
 		case CMD_SET_REGISTER:
+#ifdef _MSC_VER
+			sscanf_s(line, "%s %x", reg, (unsigned)sizeof(reg), &number);
+#else
 			sscanf(line, "%s %x", reg, &number);
+#endif
 
 			if(!strcmp(reg, "pc")) {
 				pc= number & 0xFFFF;
@@ -532,8 +560,12 @@ static void DEBUGRenderCmdLine(int x, int width, int height) {
 	SDL_SetRenderDrawColor(dbgRenderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
 	SDL_RenderDrawLine(dbgRenderer, x, height-12, x+width, height-12);
 
+#ifdef _MSC_VER
+	sprintf_s(buffer, sizeof(cmdLine) + 1, ">%s", cmdLine);
+#else
 	sprintf(buffer, ">%s", cmdLine);
-	DEBUGString(dbgRenderer, 0, DBG_HEIGHT-1, buffer, col_cmdLine);
+#endif
+	DEBUGString(dbgRenderer, 0, DBG_HEIGHT - 1, buffer, col_cmdLine);
 }
 
 // *******************************************************************************************
@@ -550,9 +582,17 @@ static void DEBUGRenderZeroPageRegisters(int y) {
 	while (reg < DBGMAX_ZERO_PAGE_REGISTERS) {
 		if (((y-y_start) % 5) != 0) {           // Break registers into groups of 5, easier to locate
 			if (reg <= LAST_R)
+#ifdef _MSC_VER
+				sprintf_s(lbl, sizeof(lbl), "R%d", reg);
+#else
 				sprintf(lbl, "R%d", reg);
+#endif
 			else
+#ifdef _MSC_VER
+				sprintf_s(lbl, sizeof(lbl), "x%d", reg);
+#else
 				sprintf(lbl, "x%d", reg);
+#endif
 
 			DEBUGString(dbgRenderer, DBG_ZP_REG, y, lbl, col_label);
 
@@ -736,7 +776,11 @@ static void DEBUGAddress(int x, int y, int bank, int addr, SDL_Color colour) {
 	if(addr >= 0xA000) {
 		snprintf(buffer, sizeof(buffer), "%.2X:", bank);
 	} else {
+#ifdef _MSC_VER
+		strcpy_s(buffer, sizeof(buffer), "--:");
+#else
 		strcpy(buffer, "--:");
+#endif
 	}
 
 	DEBUGString(dbgRenderer, x, y, buffer, colour);

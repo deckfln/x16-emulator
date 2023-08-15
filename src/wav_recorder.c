@@ -4,7 +4,11 @@
 
 #include "wav_recorder.h"
 
-#include "SDL.h"
+#ifdef _MSC_VER
+#include <SDL2/SDL.h>
+#else
+#include <SDL.h>
+#endif
 #include "audio.h"
 #include "glue.h"
 #include <string.h>
@@ -207,7 +211,11 @@ wav_recorder_set_path(const char *path)
 
 	if (path != NULL) {
 		Wav_path = malloc(sizeof(char) * (strlen(path) + 1));
+#ifdef _MSC_VER
+		strcpy_s(Wav_path, sizeof(char) * (strlen(path) + 1), path);
+#else
 		strcpy(Wav_path, path);
+#endif
 
 		if (!strcmp(Wav_path + strlen(Wav_path) - 5, ",wait")) {
 			Wav_path[strlen(Wav_path) - 5] = 0;

@@ -76,8 +76,12 @@ void testbench_init()
             if (len < 7) {
                 invalid();
             } else {
-                strncpy(val, line + 4, 2);
-                ival = hex_to_int8(val);
+#ifdef _MSC_VER
+				strncpy_s(val, sizeof(val), line + 4, 2);
+#else
+				strncpy(val, line + 4, 2);
+#endif
+				ival = hex_to_int8(val);
                 if (ival == -1) {
                     invalid();
                 } else {
@@ -91,8 +95,12 @@ void testbench_init()
             if (len < 7) {
                 invalid();
             } else {
-                strncpy(val, line + 4, 2);
-                ival = hex_to_int8(val);
+#ifdef _MSC_VER
+				strncpy_s(val, sizeof(val), line + 4, 2);
+#else
+				strncpy(val, line + 4, 2);
+#endif
+				ival = hex_to_int8(val);
                 if (ival == -1) {
                     invalid();
                 } else {
@@ -106,8 +114,13 @@ void testbench_init()
             if (len < 12) {
                 invalid();
             } else {
-                strncpy(addr, line + 4, 4);
-                strncpy(val, line + 9, 2);
+#ifdef _MSC_VER
+				strncpy_s(addr, sizeof(addr), line + 4, 4);
+				strncpy_s(val, sizeof(val), line + 9, 2);
+#else
+				strncpy(addr, line + 4, 4);
+				strncpy(val, line + 9, 2);
+#endif
 
                 iaddr = hex_to_int16(addr);
                 ival = hex_to_int8(val);
@@ -125,9 +138,16 @@ void testbench_init()
             if (len < 17) {
                 invalid();
             } else {
-                strncpy(addr, line + 4, 4);
-                strncpy(addr2, line + 9, 4);
-                strncpy(val, line + 14, 2);
+#ifdef _MSC_VER
+				strncpy_s(addr, sizeof(addr), line + 4, 4);
+				strncpy_s(addr2, sizeof(addr2), line + 9, 4);
+				strncpy_s(val, sizeof(val), line + 14, 2);
+#else
+				strncpy(addr, line + 4, 4);
+				strncpy(addr2, line + 9, 4);
+				strncpy(val, line + 14, 2);
+#endif
+				iaddr = hex_to_int16(addr);
 
                 iaddr = hex_to_int16(addr);
                 iaddr2 = hex_to_int16(addr2);
@@ -148,8 +168,12 @@ void testbench_init()
             if (len < 7) {
                 invalid();
             } else {
-                strncpy(val, line + 4, 2);
-                ival = hex_to_int8(val);
+#ifdef _MSC_VER
+				strncpy_s(val, sizeof(val), line + 4, 2);
+#else
+				strncpy(val, line + 4, 2);
+#endif
+				ival = hex_to_int8(val);
                 if (ival == -1) {
                     invalid();
                 } else {
@@ -163,8 +187,12 @@ void testbench_init()
             if (len < 7) {
                 invalid();
             } else {
-                strncpy(val, line + 4, 2);
-                ival = hex_to_int8(val);
+#ifdef _MSC_VER
+				strncpy_s(val, sizeof(val), line + 4, 2);
+#else
+				strncpy(val, line + 4, 2);
+#endif
+				ival = hex_to_int8(val);
                 if (ival == -1) {
                     invalid();
                 } else {
@@ -178,8 +206,12 @@ void testbench_init()
             if (len < 7) {
                 invalid();
             } else {
-                strncpy(val, line + 4, 2);
-                ival = hex_to_int8(val);
+#ifdef _MSC_VER
+				strncpy_s(val, sizeof(val), line + 4, 2);
+#else
+				strncpy(val, line + 4, 2);
+#endif
+				ival = hex_to_int8(val);
                 if (ival == -1) {
                     invalid();
                 } else {
@@ -193,8 +225,12 @@ void testbench_init()
             if (len < 7) {
                 invalid();
             } else {
-                strncpy(val, line + 4, 2);
-                ival = hex_to_int8(val);
+#ifdef _MSC_VER
+				strncpy_s(val, sizeof(val), line + 4, 2);
+#else
+				strncpy(val, line + 4, 2);
+#endif
+				ival = hex_to_int8(val);
                 if (ival == -1) {
                     invalid();
                 } else {
@@ -208,8 +244,12 @@ void testbench_init()
             if (len < 7) {
                 invalid();
             } else {
-                strncpy(val, line + 4, 2);
-                ival = hex_to_int8(val);
+#ifdef _MSC_VER
+				strncpy_s(val, sizeof(val), line + 4, 2);
+#else
+				strncpy(val, line + 4, 2);
+#endif
+				ival = hex_to_int8(val);
                 if (ival == -1) {
                     invalid();
                 } else {
@@ -223,7 +263,11 @@ void testbench_init()
             if (len < 9) {
                 invalid();
             } else {
-                strncpy(addr, line + 4, 4);
+#ifdef _MSC_VER
+				strncpy_s(addr, sizeof(addr), line + 4, 4);
+#else
+				strncpy(addr, line + 4, 4);
+#endif
 
                 iaddr = hex_to_int16(addr);
                 if (iaddr == -1) {
@@ -244,8 +288,12 @@ void testbench_init()
             if (len < 9) {
                 invalid();
             } else {
-                strncpy(addr, line + 4, 4);
-                iaddr = hex_to_int16(addr);
+#ifdef _MSC_VER
+				strncpy_s(addr, sizeof(addr), line + 4, 4);
+#else
+				strncpy(addr, line + 4, 4);
+#endif
+				iaddr = hex_to_int16(addr);
                 if (iaddr == -1) {
                     invalid();
                 } else {

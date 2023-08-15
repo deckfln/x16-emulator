@@ -5,13 +5,21 @@
 #include <sys/types.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
+#ifdef _MSC_VER
+#	include "../msvc/libunistd/unistd/unistd.h"
+#else
+#	include <unistd.h>
+#endif
 #include <time.h>
 #include "glue.h"
 #include "via.h"
 #include "memory.h"
 #include "video.h"
+#ifdef _MSC_VER
+#include "extern/src/ym2151.h"
+#else
 #include "ym2151.h"
+#endif
 #include "cpu/fake6502.h"
 #include "wav_recorder.h"
 #include "audio.h"

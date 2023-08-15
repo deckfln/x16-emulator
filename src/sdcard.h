@@ -5,7 +5,11 @@
 #define _SD_CARD_H_
 #include <inttypes.h>
 #include <stdbool.h>
-#include <SDL.h>
+#ifdef _MSC_VER
+#	include <SDL2/SDL.h>
+#else
+#	include <SDL.h>
+#endif
 
 extern bool sdcard_attached;
 void sdcard_set_path(char const *path);

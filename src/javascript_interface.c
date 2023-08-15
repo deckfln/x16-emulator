@@ -20,7 +20,11 @@ void
 j2c_paste(char * buffer)
 {
 	memset(javascript_text_data, 0, 65536);
+#ifdef _MSC_VER
+	strcpy_s(javascript_text_data, sizeof(javascript_text_data), buffer);
+#else
 	strcpy(javascript_text_data, buffer);
+#endif
 	machine_paste(javascript_text_data);
 }
 

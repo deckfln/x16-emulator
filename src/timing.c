@@ -5,9 +5,31 @@
 #include "glue.h"
 #include "video.h"
 #include "cpu/fake6502.h"
-#include <SDL.h>
+#ifdef _MSC_VER
+#	include <SDL2/SDL.h>
+#else
+#	include <SDL.h>
+#endif
 #include <stdio.h>
-#include <unistd.h>
+#ifdef _MSC_VER
+#	include "../msvc/libunistd/unistd/unistd.h"
+#	include <windows.h>
+
+static void
+uSleep(int64_t waitTime)
+{
+	__int64 time1 = 0, time2 = 0, freq = 0;
+
+	QueryPerformanceCounter((LARGE_INTEGER *)&time1);
+	QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
+
+	do {
+		QueryPerformanceCounter((LARGE_INTEGER *)&time2);
+	} while ((time2 - time1) < waitTime);
+}
+#else
+#	include <unistd.h>
+#endif
 
 uint32_t frames;
 uint32_t sdlTicks_base;
@@ -37,10 +59,18 @@ timing_update()
 	int64_t diff_time = cpu_ticks / MHZ - sdlTicks * 1000LL;
 	if (!warp_mode && diff_time > 0) {
 		if (diff_time >= 1000000) {
+#ifdef _MSC_VER
+			Sleep(diff_time / 1000000);
+#else
 			sleep(diff_time / 1000000);
+#endif
 			diff_time %= 1000000;
 		}
+#ifdef _MSC_VER
+		uSleep(diff_time);
+#else
 		usleep(diff_time);
+#endif
 	}
 
 	if (sdlTicks - last_perf_update > 5000) {

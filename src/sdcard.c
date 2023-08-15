@@ -8,6 +8,9 @@
 #endif
 
 #include <limits.h>
+#ifdef _MSC_VER
+#	define PATH_MAX 255
+#endif
 #include <stdio.h>
 #include <stdbool.h>
 #include "sdcard.h"
@@ -63,8 +66,12 @@ sdcard_set_path(char const *path)
 {
 	sdcard_detach();
 
+#ifdef _MSC_VER
+	strncpy_s(sdcard_path, sdcard_path, path, PATH_MAX);
+#else
 	strncpy(sdcard_path, path, PATH_MAX);
-	sdcard_path[PATH_MAX-1] = '\0';
+#endif
+	sdcard_path[PATH_MAX - 1] = '\0';
 
 	sdcard_attach();
 }

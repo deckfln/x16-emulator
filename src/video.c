@@ -8,7 +8,11 @@
 #include "glue.h"
 #include "debugger.h"
 #include "keyboard.h"
-#include "gif.h"
+#ifdef _MSC_VER
+#	include "../msvc/include/gif.h"
+#else
+#	include "gif.h"
+#endif
 #include "joystick.h"
 #include "vera_spi.h"
 #include "vera_psg.h"
@@ -406,7 +410,11 @@ mousegrab_toggle() {
 	mouse_grabbed = !mouse_grabbed;
 	SDL_SetRelativeMouseMode(mouse_grabbed);
 	SDL_ShowCursor((mouse_grabbed || kernal_mouse_enabled) ? SDL_DISABLE : SDL_ENABLE);
+#ifdef _MSC_VER
+	sprintf_s(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
+#else
 	sprintf(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
+#endif
 	video_update_title(window_title);
 }
 
@@ -1641,7 +1649,11 @@ stop6502(uint16_t address) {
 			2, btns, NULL
 		};
 
+#ifdef _MSC_VER
+		sprintf_s(error_message, "Encountered stop instruction at address $%04X. CPU cannot continue.", address);
+#else
 		sprintf(error_message, "Encountered stop instruction at address $%04X. CPU cannot continue.", address);
+#endif
 		if (SDL_ShowMessageBox(&msg_box, &return_btn) == 0 && return_btn == 0) {
 			machine_reset();
 		};

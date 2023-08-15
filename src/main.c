@@ -2,6 +2,10 @@
 // Copyright (c) 2019,2022 Michael Steil
 // All rights reserved. License: 2-clause BSD
 
+#ifdef _MSC_VER
+#	define SDL_MAIN_HANDLED
+#endif
+
 #ifndef __APPLE__
 #define _XOPEN_SOURCE   600
 #define _POSIX_C_SOURCE 1
@@ -11,7 +15,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
+#ifdef _MSC_VER
+#	include "../msvc/libunistd/unistd/unistd.h"
+#else
+#	include <unistd.h>
+#endif
 #include <limits.h>
 #ifdef __MINGW32__
 #include <ctype.h>
@@ -35,7 +43,11 @@
 #include "joystick.h"
 #include "utf8_encode.h"
 #include "rom_symbols.h"
-#include "ym2151.h"
+#ifdef _MSC_VER
+#	include "extern/src/ym2151.h"
+#else
+#	include "ym2151.h"
+#endif
 #include "audio.h"
 #include "version.h"
 #include "wav_recorder.h"

@@ -51,11 +51,20 @@ cartridge_load(const char *path, bool randomize)
 
 	const size_t path_len = strlen(path);
 	Cartridge_path = malloc(path_len + 1);
+#ifdef _MSC_VER
+	strcpy_s(Cartridge_path, path_len + 1, path);
+#else
 	strcpy(Cartridge_path, path);
+#endif
 
 	Cartridge_nvram_path = malloc(path_len + 3);
+#ifdef _MSC_VER
+	strcpy_s(Cartridge_nvram_path, path_len + 3, Cartridge_path);
+	strcpy_s(Cartridge_nvram_path + path_len - 3, 3, "nvram");
+#else
 	strcpy(Cartridge_nvram_path, Cartridge_path);
 	strcpy(Cartridge_nvram_path + path_len - 3, "nvram");
+#endif
 
 	struct x16file *cart = x16open(Cartridge_path, "rb");
 	struct x16file *nvram = x16open(Cartridge_nvram_path, "rb");

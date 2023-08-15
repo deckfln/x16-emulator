@@ -17,10 +17,20 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <sys/stat.h>
-#include <dirent.h>
-#include <unistd.h>
+#ifdef _MSC_VER
+#	include "../msvc/libunistd/unistd/dirent.h"
+#	include "../msvc/libunistd/unistd/unistd.h"
+#	define localtime_r(S, D) !localtime_s(D, S)
+#else
+#	include <dirent.h>
+#	include <unistd.h>
+#endif
 #include <stdlib.h>
+#ifdef _MSC_VER
+#include <SDL2/SDL.h>
+#else
 #include <SDL.h>
+#endif
 #include <errno.h>
 #include <time.h>
 #include "memory.h"
@@ -1581,7 +1591,7 @@ int
 MACPTR(uint16_t addr, uint16_t *c, uint8_t stream_mode)
 {
 	int ret = 0;
-	int count = *c ?: 256;
+	int count = *c ? 0 : 256;
 	uint8_t ram_bank = read6502(0);
 	int i = 0;
 	if (channels[channel].f) {

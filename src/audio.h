@@ -4,7 +4,11 @@
 
 #pragma once
 
-#include <SDL.h>
+#ifdef _MSC_VER
+#	include <SDL2/SDL.h>
+#else
+#	include <SDL.h>
+#endif
 
 #define AUDIO_SAMPLERATE (25000000 / 512)
 

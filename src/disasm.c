@@ -105,7 +105,11 @@ int disasm(uint16_t pc, uint8_t *RAM, char *line, unsigned int max_line, bool de
 	int isIndirect = (((opcode & 0x0f) == 0x01) || ((opcode & 0x1f) == 0x12) || opcode == 0x6c || opcode == 0x7c);
 
 	int length   = 1;
-	strncpy(line,mnemonic,max_line);
+#ifdef _MSC_VER
+	strncpy_s(line, 15, mnemonic, max_line);
+#else
+	strncpy(line, mnemonic, max_line);
+#endif
 
 	if (isZprel) {
 		snprintf(line, max_line, mnemonic, real_read6502(pc + 1, debugOn, bank), pc + 3 + (int8_t)real_read6502(pc + 2, debugOn, bank));

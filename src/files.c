@@ -8,7 +8,12 @@
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
-#include <SDL.h>
+#ifdef _MSC_VER
+#	include <SDL2/SDL.h>
+#include "../msvc/limits.h"
+#else
+#	include <SDL.h>
+#endif
 #include <zlib.h>
 #include <inttypes.h>
 
@@ -34,8 +39,13 @@ get_tmp_name(char *path_buffer, const char *original_path, char const *extension
 		return false;
 	}
 
+#ifdef _MSC_VER
+	strcpy_s(path_buffer, PATH_MAX, original_path);
+	strcat_s(path_buffer, PATH_MAX, extension);
+#else
 	strcpy(path_buffer, original_path);
 	strcat(path_buffer, extension);
+#endif
 
 	return true;
 }
@@ -94,7 +104,11 @@ struct x16file *
 x16open(const char *path, const char *attribs)
 {
 	struct x16file *f = malloc(sizeof(struct x16file));
+#ifdef _MSC_VER
+	strcpy_s(f->path, PATH_MAX, path);
+#else
 	strcpy(f->path, path);
+#endif
 
 	if(file_is_compressed_type(path)) {
 		char tmp_path[PATH_MAX];
@@ -142,7 +156,11 @@ x16open(const char *path, const char *attribs)
 
 		f->file = SDL_RWFromFile(tmp_path, attribs);
 		if(f->file == NULL) {
+#ifdef _MSC_VER
+			_unlink(tmp_path);
+#else
 			unlink(tmp_path);
+#endif
 			goto error;
 		}
 		f->size = total_read;
@@ -230,7 +248,11 @@ x16close(struct x16file *f)
 
 	zfile_error: // fall-through
 	zfile_clean:
+#ifdef _MSC_VER
+		_unlink(tmp_path);
+#else
 		unlink(tmp_path);
+#endif
 	}
 tmp_path_error:
 	if(f == open_files) {

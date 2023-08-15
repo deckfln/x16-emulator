@@ -1,5 +1,9 @@
 #include <string.h>
-#include <SDL.h>
+#ifdef _MSC_VER
+#	include <SDL2/SDL.h>
+#else
+#	include <SDL.h>
+#endif
 #ifdef __MINGW32__
 #include <ctype.h>
 #endif

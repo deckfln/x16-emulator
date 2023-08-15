@@ -1,4 +1,8 @@
-#include <SDL.h>
+#ifdef _MSC_VER
+#	include <SDL2/SDL.h>
+#else
+#	include <SDL.h>
+#endif
 #include <stdio.h>
 #include <stdbool.h>
 #include "glue.h"

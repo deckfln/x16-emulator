@@ -2,7 +2,11 @@
 #ifndef _RENDERTEXT_H
 #define _RENDERTEXT_H
 
-#include <SDL.h>
+#ifdef _MSC_VER
+#	include <SDL2/SDL.h>
+#else
+#	include <SDL.h>
+#endif
 
 #define CHAR_SCALE 		(1)										// character pixel size.
 

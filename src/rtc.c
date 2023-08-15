@@ -43,8 +43,13 @@ rtc_init(bool set_system_time)
 	if (set_system_time) {
 		running = true;
 		time_t t = time(NULL);
+#ifdef _MSC_VER
+		struct tm tm;
+		localtime_s(&tm, &t);
+#else
 		struct tm tm = *localtime(&t);
-		seconds = tm.tm_sec;
+#endif
+		seconds     = tm.tm_sec;
 		minutes = tm.tm_min;
 		hours = tm.tm_hour;
 		day_of_week = (tm.tm_wday == 0 ? 7 : tm.tm_wday);
