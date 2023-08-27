@@ -13,6 +13,7 @@ enum REMOTED_CMD {
 	CPU_RUN
 };
 
+
 bool remoted_open(void);
 void remoted_close(void);
 enum REMOTED_CMD remoted_getStatus(void);

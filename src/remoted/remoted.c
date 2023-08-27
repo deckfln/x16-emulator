@@ -349,6 +349,7 @@ enum WATCH_STATUS {
 	EXACT_VALUE
 };
 
+
 struct myWatch {
 	uint8_t  status;
 	uint8_t  len; // 8 bits, 16 bits, 24 bits, 32 bits

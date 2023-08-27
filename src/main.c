@@ -1346,8 +1346,12 @@ emulator_loop(void *param)
 			if (dbgCmd > 0) continue;
 			if (dbgCmd < 0) break;
 		}
+
 		if (remote_debugger) {
-			remoted_getcommand();
+			enum REMOTE_CMD cmd = remoted_getStatus();
+			if (cmd == CPU_STOP || cmd == CPU_EXECUTE_NEXT)
+				// system is on hold waiting for the remote debugger
+				continue;
 		}
 
 #ifdef PERFSTAT
