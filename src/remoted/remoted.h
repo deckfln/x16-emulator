@@ -6,6 +6,13 @@
 
 #include <stdbool.h>
 
+enum REMOTED_CMD {
+	CPU_STOP,
+	CPU_EXECUTE_NEXT,
+	CPU_NEXT,
+	CPU_RUN
+};
+
 bool remoted_open(void);
 void remoted_close(void);
-void remoted_getcommand(void);
+enum REMOTED_CMD remoted_getStatus(void);

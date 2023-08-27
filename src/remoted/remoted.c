@@ -3,12 +3,18 @@
 #include <winsock2.h>
 #include <microhttpd.h>
 #include <png.h>
+#include <cjson/cJSON.h>
 
 #include "../video.h"
+#include "../memory.h"
+#include "../debugger.h"
+#include "../glue.h"
 
 //-----------------------------------------------------------
 //   private functions
 //-----------------------------------------------------------
+
+static enum REMOTE_CMD myStatus = CPU_RUN;
 
 static struct MHD_Daemon *daemon = NULL;
 static fd_set rs;
@@ -16,6 +22,11 @@ static fd_set ws;
 static fd_set es;
 static MHD_UNSIGNED_LONG_LONG mhd_timeout;
 static MHD_socket  max = 0;
+
+static char *ok = "{\"status\" : \"ok\"}";
+
+static char json[8192];
+char        tmp[256] = {0};
 
 /**
  *
@@ -25,7 +36,31 @@ remoted_error(struct MHD_Connection *connection, const char *page)
 {
 	struct MHD_Response *response = MHD_create_response_from_buffer(strlen(page), (void *)page, MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "text/html");
+	MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
 	MHD_queue_response(connection, MHD_HTTP_OK, response);
+	return response;
+}
+
+/**
+ * send a json as response
+ */
+struct MHD_Response *
+remoted_json(struct MHD_Connection *connection, cJSON *answer)
+{
+	char *string = cJSON_Print(answer);
+	cJSON_Delete(answer);
+#ifdef _MSC_VER
+	strncpy_s(json, sizeof(json), string, sizeof(json));
+#else
+	strncpy(json, string, sizeof(json));
+#endif
+	free(string);
+
+	struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
+	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+	MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+	MHD_queue_response(connection, MHD_HTTP_OK, response);
+
 	return response;
 }
 
@@ -142,7 +177,7 @@ sprite_to_png(struct png_mem_encode *target, uint32_t *bitmap, uint8_t width, ui
 }
 
 /**
- *
+ * display sprites
  */
 static struct MHD_Response *
 remoted_sprite(struct MHD_Connection* connection, char** next_token)
@@ -210,6 +245,7 @@ remoted_sprite(struct MHD_Connection* connection, char** next_token)
 			snprintf(page, sizeof(page), "spriteID %d", spriteID);
 			struct MHD_Response *response = MHD_create_response_from_buffer(target.size, target.buffer, MHD_RESPMEM_PERSISTENT);
 			MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "image/png");
+			MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
 			MHD_queue_response(connection, MHD_HTTP_OK, response);
 
 			return response;
@@ -223,7 +259,7 @@ remoted_sprite(struct MHD_Connection* connection, char** next_token)
 }
 
 /**
- *
+ * Display VERA information
  */
 static struct MHD_Response *
 remoted_vera(struct MHD_Connection *connection, char **next_token)
@@ -241,6 +277,558 @@ remoted_vera(struct MHD_Connection *connection, char **next_token)
 	const char *page = "incorect vera command provided";
 	return remoted_error(connection, page);
 }
+
+/********************************************************************
+ *		manage memory
+ ********************************************************************/
+
+static int
+getCurrentBank(int pc)
+{
+	int bank = 0;
+	if (pc >= 0xA000) {
+		bank = pc < 0xC000 ? memory_get_ram_bank() : memory_get_rom_bank();
+	}
+	return bank;
+}
+
+/**
+ * Display MEMORY information
+ */
+static struct MHD_Response *
+remoted_dump(struct MHD_Connection *connection, char **next_token)
+{
+#ifdef _MSC_VER
+	char *token = strtok_s(NULL, "/", next_token);
+#else
+	char *token = strtok(NULL, "/");
+#endif
+
+	int len = 256;
+
+	if (token != NULL) {
+		uint8_t bank = (uint8_t)atoi(token);
+		char    *addr = strtok_s(NULL, "/", next_token);
+		if (token != NULL) {
+			uint16_t address;
+			if (addr[0] == '0' && addr[1] == 'x')
+				address = (uint16_t)strtol(addr, NULL, 16);
+			else
+				address = (uint16_t)atoi(addr);
+
+			char *slength = strtok_s(NULL, "/", next_token);
+			if (slength != NULL) {
+				len = atoi(slength);
+			}
+
+			static uint8_t dump[256];
+			for (int i = 0; i < len; i++) {
+				dump[i] = real_read6502(address++, true, bank);
+			}
+			struct MHD_Response *response = MHD_create_response_from_buffer(len, dump, MHD_RESPMEM_PERSISTENT);
+			MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/octet-stream");
+			MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+			MHD_queue_response(connection, MHD_HTTP_OK, response);
+			return response;
+		}
+	}
+
+	const char *page = "incorect dump command provided";
+	return remoted_error(connection, page);
+}
+
+/********************************************************************
+ *		manage memory Watch breakpoints
+ ********************************************************************/
+
+#define MAX_WATCHES 128
+
+enum WATCH_STATUS {
+	OFF,
+	VALUE_CHANGED,
+	EXACT_VALUE
+};
+
+struct myWatch {
+	uint8_t  status;
+	uint8_t  len; // 8 bits, 16 bits, 24 bits, 32 bits
+	uint16_t addr;
+	uint16_t bank;
+	uint32_t prev_value;	// value at previous instruction
+	uint32_t watchFor;		// value to monitor
+};
+
+static struct myWatch watches[MAX_WATCHES];
+
+/**
+ * init breakpoints
+ */
+static void
+initWatches(void)
+{
+	for (int i = 0; i < MAX_WATCHES; i++) {
+		watches[i].status = OFF;
+	}
+}
+
+/**
+ * read memory
+ */
+static uint32_t
+read_memory(len, address, bank)
+{
+	switch (len) {
+		case 1:
+			return real_read6502(address, true, bank);
+		case 2:
+			return (real_read6502(address, true, bank) << 8) | real_read6502(address + 1, true, bank);
+		case 4:
+			return (real_read6502(address, true, bank) << 24) |
+			       (real_read6502(address + 1, true, bank) << 16) |
+			       (real_read6502(address + 2, true, bank) << 8) |
+			       real_read6502(address + 3, true, bank);
+		default:
+			__debugbreak();
+	}
+
+	return 0;
+}
+
+/**
+ * did we hit a breakpoint ?
+ */
+static bool
+hitWatch(void)
+{
+	// check dev defined breakpoints
+	for (int i = 0; i < MAX_WATCHES; i++) {
+		if (watches[i].status == OFF) {
+			continue;
+		}
+
+		uint16_t a = watches[i].addr;
+		uint8_t  b = watches[i].bank;
+		uint32_t v = read_memory(watches[i].len, a, b);
+
+		switch (watches[i].status) {
+			case EXACT_VALUE:
+				return v == watches[i].watchFor;
+			case VALUE_CHANGED: {
+				bool t = v != watches[i].prev_value;
+				if (t) {
+					watches[i].prev_value = v;
+				}
+				return t;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * provide list of watches
+ */
+static struct MHD_Response *
+remoted_watch_list(struct MHD_Connection* connection, char** next_token)
+{
+	// provide a list of watches
+	json[0] = '[';
+	json[1] = 0;
+
+	// return a list of breakpoints
+	bool first = true;
+	for (int i = 0; i < MAX_WATCHES; i++) {
+		if (watches[i].status != OFF) {
+#ifdef _MSC_VER
+			if (!first) {
+				strcat_s(json, sizeof(json), ",");
+			}
+			snprintf(tmp, sizeof(tmp) + 1, \
+				"{\"addr\":%d, \"bank\":%d, \"len\":%d}", \
+				watches[i].addr, \
+				watches[i].bank, \
+				watches[i].len);
+			strcat_s(json, sizeof(json), tmp);
+#else
+			if (!first) {
+				strcat(json, ",");
+			}
+			sprintf(tmp, "{\"addr\":%04X}", breakpoints[i].pc, breakpoints[i].bank);
+			if (strlen(tmp) + strlen(json) + 4 < sizeof(json)) {
+				strcat(json, tmp);
+			}
+#endif
+			first = false;
+		}
+	}
+#ifdef _MSC_VER
+	strcat_s(json, sizeof(json), "]");
+#else
+	strcat(json[0], "]");
+#endif
+
+	struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
+	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+	MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+	MHD_queue_response(connection, MHD_HTTP_OK, response);
+	return response;
+}
+
+ /**
+ * Set memory WATCH breakpoint
+ * /watch/bank/memory/len/value
+ */
+static struct MHD_Response *
+remoted_watch(struct MHD_Connection *connection, char **next_token)
+{
+	static char *nok = "{\"status\" : \"error\", \"message\":\"no available breakpoint\"}";
+
+#ifdef _MSC_VER
+	char *token = strtok_s(NULL, "/", next_token);
+#else
+	char *token = strtok(NULL, "/");
+#endif
+
+	uint8_t status = OFF;
+	uint8_t length = 0;
+	uint8_t value = 0;
+
+	if (token != NULL) {
+		// change a watch
+		uint8_t bank = (uint8_t)atoi(token);
+		char   *addr = strtok_s(NULL, "/", next_token);
+		if (token != NULL) {
+			uint16_t address = 0;
+			if (addr[0] == '0' && addr[2] == 'x') {
+				address = (uint16_t)strtol(addr + 2, NULL, 16);
+			} else {
+				address = (uint16_t)atoi(addr);
+			}
+
+			char *slength= strtok_s(NULL, "/", next_token);
+			if (slength != NULL) {
+				length = atoi(slength);
+
+				status = VALUE_CHANGED;
+				char *svalue = strtok_s(NULL, "/", next_token);
+				if (svalue != NULL) {
+					value  = atoi(svalue);
+					status = EXACT_VALUE;
+				}
+			}
+			
+			char *json = nok;
+
+			// find first available watch
+			// and check if the watch is already set
+			int index           = -1;
+			int first_available = -1;
+			for (int i = 0; i < MAX_WATCHES; i++) {
+				if (watches[i].status == OFF && first_available < 0) {
+					first_available = i;
+				}
+				else if (watches[i].addr == address && watches[i].bank == bank) {
+					index = i;
+					break;
+				}
+			}
+
+			if (index >= 0) {
+				// the watch already exists
+				switch (status) {
+					case EXACT_VALUE:
+						watches[index].watchFor = value;
+						watches[index].len      = length;
+						break;
+					case VALUE_CHANGED:
+						watches[index].len = length;
+						watches[index].prev_value = read_memory(length, address, bank);
+						break;
+					default:
+						// remove the watch
+						watches[index].status = OFF;
+				}
+				json = ok;
+			}
+			else if (first_available >= 0) {
+				// create a new watch
+				watches[first_available].addr     = address;
+				watches[first_available].bank   = bank;
+				watches[first_available].prev_value = read_memory(length, address, bank);
+				watches[first_available].len = length;
+
+				if (status == EXACT_VALUE) {
+					watches[first_available].status = EXACT_VALUE;
+					watches[first_available].watchFor = value;
+				}
+				else {
+					watches[first_available].status = VALUE_CHANGED;
+				}
+				json = ok;
+			}
+			else {
+				json = nok;	// no available slot
+			}
+
+			struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
+			MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+			MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+			MHD_queue_response(connection, MHD_HTTP_OK, response);
+			return response;
+		}
+	} else {
+		remoted_watch_list(connection, next_token);
+	}
+	const char *page = "incorect breakpoint command provided";
+	return remoted_error(connection, page);
+}
+
+/********************************************************************
+ *		manage CPU breakpoints
+ ********************************************************************/
+
+#define MAX_BREAKPOINTS 128
+
+struct myBreakpoint {
+	bool active;
+	uint16_t pc;
+	uint16_t bank;
+};
+static struct myBreakpoint breakpoints[MAX_BREAKPOINTS];
+static struct myBreakpoint stepOver = {false, 0, 0};
+
+/**
+ * init breakpoints
+ */
+static void
+initBreakpoints(void)
+{
+	for (int i = 0; i < MAX_BREAKPOINTS; i++) {
+		breakpoints[i].active = FALSE;
+	}
+}
+
+/**
+ * did we hit a breakpoint ?
+ */
+static bool
+hitBreakpoint(uint16_t pc, uint8_t bank)
+{
+	// check dev defined breakpoints
+	for (int i = 0; i < MAX_BREAKPOINTS; i++) {
+		if (breakpoints[i].active && breakpoints[i].bank == bank && breakpoints[i].pc == pc) {
+			return true;
+		}
+	}
+
+	// check the stepOver
+	if (stepOver.active && stepOver.bank == bank && stepOver.pc == pc) {
+		stepOver.active = false;
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * Set CPU breakpoint
+ */
+static struct MHD_Response *
+remoted_breakpoint(struct MHD_Connection *connection, char **next_token)
+{
+	static char *nok = "{\"status\" : \"error\", \"message\":\"no available breakpoint\"}";
+
+#ifdef _MSC_VER
+	char *token = strtok_s(NULL, "/", next_token);
+#else
+	char *token = strtok(NULL, "/");
+#endif
+
+	if (token != NULL) {
+		uint8_t bank = (uint8_t)atoi(token);
+		char   *addr = strtok_s(NULL, "/", next_token);
+		if (token != NULL) {
+			uint16_t address = 0;
+			if (addr[0] == '0' && addr[2] == 'x') {
+				address = (uint16_t)strtol(addr + 2, NULL, 16);
+			} else {
+				address = (uint16_t)atoi(addr);
+			}
+			char *json = nok;
+
+			// find first available breakpoint
+			// and check if the breakpoint is already set
+			int index           = -1;
+			int first_available = -1;
+			for (int i = 0; i < MAX_BREAKPOINTS; i++) {
+				if (breakpoints[i].active == FALSE && first_available < 0) {
+					first_available = i;
+				} else if (breakpoints[i].pc == address && breakpoints[i].bank == bank) {
+					breakpoints[i].active = FALSE;
+					json                  = ok;
+					break;
+				}
+			}
+
+			if (json == nok && first_available >= 0) {
+				breakpoints[first_available].active = TRUE;
+				breakpoints[first_available].pc     = address;
+				breakpoints[first_available].bank   = bank;
+				json                                = ok;
+			}
+
+			struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
+			MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+			MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+			MHD_queue_response(connection, MHD_HTTP_OK, response);
+			return response;
+		}
+	} else {
+		json[0] = '[';
+		json[1] = 0;
+
+		// return a list of breakpoints
+		bool first = true;
+		for (int i = 0; i < MAX_BREAKPOINTS; i++) {
+			if (breakpoints[i].active) {
+#ifdef _MSC_VER
+				if (!first) {
+					strcat_s(json, sizeof(json), ",");
+				}
+				snprintf(tmp, sizeof(tmp) + 1, "{\"addr\":%d, \"bank\":%d}", breakpoints[i].pc, breakpoints[i].bank);
+				strcat_s(json, sizeof(json), tmp);
+#else
+				if (!first) {
+					strcat(json, ",");
+				}
+				sprintf(tmp, "{\"addr\":%04X}", breakpoints[i].pc, breakpoints[i].bank);
+				if (strlen(tmp) + strlen(json) + 4 < sizeof(json)) {
+					strcat(json, tmp);
+				}
+#endif
+				first = false;
+			}
+		}
+#ifdef _MSC_VER
+		strcat_s(json, sizeof(json), "]");
+#else
+		strcat(json[0], "]");
+#endif
+
+		struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
+		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+		MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+		MHD_queue_response(connection, MHD_HTTP_OK, response);
+		return response;
+	}
+	const char *page = "incorect breakpoint command provided";
+	return remoted_error(connection, page);
+}
+
+/********************************************************************
+ *		step by step /debug/
+ ********************************************************************/
+
+static struct MHD_Response *
+remoted_debug(struct MHD_Connection *connection, char **next_token)
+{
+#ifdef _MSC_VER
+	char *token = strtok_s(NULL, "/", next_token);
+#else
+	char *token = strtok(NULL, "/");
+#endif
+
+	if (token != NULL) {
+		if (strcmp(token, "stepinto") == 0) {
+			myStatus = CPU_EXECUTE_NEXT;
+		}
+		else if (strcmp(token, "continue") == 0) {
+			myStatus = CPU_RUN;
+		} else if (strcmp(token, "stepover") == 0) {
+			int bank   = getCurrentBank(pc);
+			int opcode = real_read6502(pc, true, bank); // What opcode is it ?
+			if (opcode == 0x20) {                            // Is it JSR ?
+				stepOver.pc   = pc + 3;                // Then break 3 on.
+				stepOver.bank = getCurrentBank(pc);
+				stepOver.active = true;
+				timing_init();
+				myStatus = CPU_RUN;
+			} else {
+				myStatus = CPU_EXECUTE_NEXT;
+			}
+		}
+		else if (strcmp(token, "stepout") == 0) {
+			// extract PC from the stack
+#define BASE_STACK 0x100
+			uint16_t rts = read6502(BASE_STACK + ((sp + 1) & 0xFF)) | ((uint16_t)read6502(BASE_STACK + ((sp + 2) & 0xFF)) << 8);
+			uint16_t nexti = rts + 1;
+			stepOver.pc     = nexti;
+			stepOver.bank   = getCurrentBank(pc);
+			stepOver.active = true;
+			timing_init();
+			myStatus = CPU_RUN;
+		}
+
+		struct MHD_Response *response = MHD_create_response_from_buffer(strlen(ok), ok, MHD_RESPMEM_PERSISTENT);
+		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+		MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+		MHD_queue_response(connection, MHD_HTTP_OK, response);
+
+		return response;
+	}
+
+	const char *page = "incorect debug command provided";
+	return remoted_error(connection, page);
+}
+
+/********************************************************************
+ *		provide CPU flags
+ ********************************************************************/
+
+static struct MHD_Response *
+remoted_cpu(struct MHD_Connection *connection, char **next_token)
+{
+	int    bank   = getCurrentBank(pc);
+
+	cJSON *answer = cJSON_CreateObject();
+	cJSON *jbank = cJSON_CreateNumber(bank);
+	cJSON_AddItemToObject(answer, "bank", jbank);
+	cJSON *jpc = cJSON_CreateNumber(pc);
+	cJSON_AddItemToObject(answer, "pc", jpc);
+	cJSON *jsp = cJSON_CreateNumber(sp);
+	cJSON_AddItemToObject(answer, "sp", jsp);
+	cJSON *ja = cJSON_CreateNumber(a);
+	cJSON_AddItemToObject(answer, "a", ja);
+	cJSON *jx = cJSON_CreateNumber(x);
+	cJSON_AddItemToObject(answer, "x", jx);
+	cJSON *jy = cJSON_CreateNumber(y);
+	cJSON_AddItemToObject(answer, "y", jy);
+	cJSON *jstatus = cJSON_CreateNumber(status);
+	cJSON_AddItemToObject(answer, "flags", jstatus);
+	cJSON *jmyStatus = cJSON_CreateNumber(myStatus);
+	cJSON_AddItemToObject(answer, "myStatus", jmyStatus);
+
+	char *string = cJSON_Print(answer);
+	cJSON_Delete(answer);
+
+#ifdef _MSC_VER
+	strncpy_s(json, sizeof(json), string, sizeof(json));
+#else
+	strncpy(json, string, sizeof(json));
+#endif
+	free(string);
+
+	struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
+	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+	MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+	MHD_queue_response(connection, MHD_HTTP_OK, response);
+
+	return response;
+}
+
+/********************************************************************
+ *		threads to receive requests
+ ********************************************************************/
 
 /**
  *
@@ -272,8 +860,27 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 	char *token = strtok((char *)url, "/");
 #endif
 
-	if (strcmp(token, "vera") == 0) {
+	if (token == NULL) {
+		const char *page = "incorect command provided";
+		remoted_error(connection, page);
+	}
+	else if (strcmp(token, "vera") == 0) {
 		response = remoted_vera(connection, &next_token);
+	}
+	else if (strcmp(token, "dump") == 0) {
+		response = remoted_dump(connection, &next_token);
+	}
+	else if (strcmp(token, "breakpoint") == 0) {
+		response = remoted_breakpoint(connection, &next_token);
+	}
+	else if (strcmp(token, "debug") == 0) {
+		response = remoted_debug(connection, &next_token);
+	}
+	else if (strcmp(token, "cpu") == 0) {
+		response = remoted_cpu(connection, &next_token);
+	}
+	else if (strcmp(token, "watch") == 0) {
+		response = remoted_watch(connection, &next_token);
 	}
 
 	if (response != NULL) {
@@ -293,6 +900,9 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 bool
 remoted_open(void)
 {
+	initBreakpoints();
+	initWatches();
+
 	daemon = MHD_start_daemon(MHD_USE_THREAD_PER_CONNECTION | MHD_USE_INTERNAL_POLLING_THREAD | MHD_USE_ERROR_LOG, 9009, NULL, NULL, &ahc_echo, NULL, MHD_OPTION_END);
 	if (daemon == NULL)
 		return false;
@@ -306,7 +916,23 @@ remoted_close(void)
 	MHD_stop_daemon(daemon);
 }
 
-void
-remoted_getcommand(void)
+enum REMOTED_CMD
+remoted_getStatus(void)
 {
+	if (myStatus == CPU_NEXT) {
+		// synchronous execution => send the response to the debugger;
+		myStatus = CPU_STOP;
+	}
+	else if (myStatus == CPU_EXECUTE_NEXT) { // EXECUTE_NEXT set by remote debuggers
+		myStatus = CPU_NEXT;			// so execute the next instruction
+	}
+	else if (myStatus == CPU_RUN) {
+		//TODO get current bank
+		if (hitBreakpoint(pc, 0) || hitWatch()) {
+			myStatus = CPU_STOP;
+		}
+	} else {
+		video_update();
+	}
+	return myStatus;
 }
