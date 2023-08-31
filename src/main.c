@@ -1349,9 +1349,13 @@ emulator_loop(void *param)
 
 		if (remote_debugger) {
 			enum REMOTE_CMD cmd = remoted_getStatus();
-			if (cmd == CPU_STOP || cmd == CPU_EXECUTE_NEXT)
+			if (cmd == CPU_STOP || cmd == CPU_EXECUTE_NEXT) {
 				// system is on hold waiting for the remote debugger
 				continue;
+			}
+			else if (cmd == CPU_EXIT) {
+				break;
+			}
 		}
 
 #ifdef PERFSTAT

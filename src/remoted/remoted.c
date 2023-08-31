@@ -42,6 +42,15 @@ remoted_error(struct MHD_Connection *connection, const char *page)
 }
 
 /**
+ *
+ */
+struct MHD_Response *
+remoted_ok(struct MHD_Connection *connection)
+{
+	return remoted_error(connection, ok);
+}
+
+/**
  * send a json as response
  */
 struct MHD_Response *
@@ -454,7 +463,7 @@ remoted_watch_list(struct MHD_Connection* connection, char** next_token)
 			if (!first) {
 				strcat(json, ",");
 			}
-			sprintf(tmp, "{\"addr\":%04X}", breakpoints[i].pc, breakpoints[i].bank);
+			sprintf(tmp, "{\"addr\":%04X,\"lzn\":%d}", watches[i].pc, watches[i].bank, watches[i].len);
 			if (strlen(tmp) + strlen(json) + 4 < sizeof(json)) {
 				strcat(json, tmp);
 			}
@@ -770,12 +779,7 @@ remoted_debug(struct MHD_Connection *connection, char **next_token)
 			myStatus = CPU_RUN;
 		}
 
-		struct MHD_Response *response = MHD_create_response_from_buffer(strlen(ok), ok, MHD_RESPMEM_PERSISTENT);
-		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
-		MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
-		MHD_queue_response(connection, MHD_HTTP_OK, response);
-
-		return response;
+		return remoted_ok(connection);
 	}
 
 	const char *page = "incorect debug command provided";
@@ -809,22 +813,35 @@ remoted_cpu(struct MHD_Connection *connection, char **next_token)
 	cJSON *jmyStatus = cJSON_CreateNumber(myStatus);
 	cJSON_AddItemToObject(answer, "myStatus", jmyStatus);
 
-	char *string = cJSON_Print(answer);
-	cJSON_Delete(answer);
+	return remoted_json(connection, answer);
+}
 
+/********************************************************************
+ *		move PC pointer to XXXX (means "run")
+ ********************************************************************/
+
+/**
+ * Set CPU breakpoint
+ */
+static struct MHD_Response *
+remoted_run(struct MHD_Connection *connection, char **next_token)
+{
 #ifdef _MSC_VER
-	strncpy_s(json, sizeof(json), string, sizeof(json));
+	char *token = strtok_s(NULL, "/", next_token);
 #else
-	strncpy(json, string, sizeof(json));
+	char *token = strtok(NULL, "/");
 #endif
-	free(string);
 
-	struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
-	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
-	MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
-	MHD_queue_response(connection, MHD_HTTP_OK, response);
+	if (token != NULL) {
+		uint16_t addr = (uint16_t)atoi(token);
 
-	return response;
+		pc = addr;
+		return remoted_ok(connection);
+
+	}
+
+	const char *page = "incorect /RUN/";
+	return remoted_error(connection, page);
 }
 
 /********************************************************************
@@ -883,6 +900,9 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 	else if (strcmp(token, "watch") == 0) {
 		response = remoted_watch(connection, &next_token);
 	}
+	else if (strcmp(token, "run") == 0) {
+		response = remoted_run(connection, &next_token);
+	}
 
 	if (response != NULL) {
 		MHD_destroy_response(response);
@@ -933,7 +953,11 @@ remoted_getStatus(void)
 			myStatus = CPU_STOP;
 		}
 	} else {
-		video_update();
+		// CPU_STOP
+		if (!video_update()) {
+			// SDL Quit event
+			myStatus = CPU_EXIT;
+		}
 	}
 	return myStatus;
 }
