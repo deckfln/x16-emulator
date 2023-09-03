@@ -34,20 +34,18 @@
 #include "serial.h"
 #include "i2c.h"
 #include "rtc.h"
+#include "smc.h"
 #include "vera_spi.h"
 #include "sdcard.h"
 #include "ieee.h"
 #include "glue.h"
 #include "debugger.h"
 #include "utf8.h"
+#include "iso_8859_15.h"
 #include "joystick.h"
 #include "utf8_encode.h"
 #include "rom_symbols.h"
-#ifdef _MSC_VER
-#	include "extern/src/ym2151.h"
-#else
-#	include "ym2151.h"
-#endif
+#include "ymglue.h"
 #include "audio.h"
 #include "version.h"
 #include "wav_recorder.h"
@@ -101,6 +99,7 @@ uint32_t stat[65536];
 
 bool debugger_enabled = false;
 char *paste_text = NULL;
+char *clipboard_buffer = NULL;
 char paste_text_data[65536];
 bool pasting_bas = false;
 
@@ -124,17 +123,21 @@ bool has_via2 = false;
 gif_recorder_state_t record_gif = RECORD_GIF_DISABLED;
 char *gif_path = NULL;
 char *wav_path = NULL;
-char *fsroot_path = NULL;
-char *startin_path = NULL;
+uint8_t *fsroot_path = NULL;
+uint8_t *startin_path = NULL;
 uint8_t keymap = 0; // KERNAL's default
 int window_scale = 1;
 float screen_x_scale = 1.0;
+float window_opacity = 1.0;
 char *scale_quality = "best";
 bool test_init_complete=false;
 bool headless = false;
+bool fullscreen = false;
 bool testbench = false;
 bool enable_midline = false;
 bool remote_debugger = false;
+bool ym2151_irq_support = false;
+char *cartridge_path = NULL;
 
 uint8_t MHZ = 8;
 
@@ -299,6 +302,7 @@ void mouse_state_init(void)
 void
 machine_reset()
 {
+	i2c_reset_state();
 	ieee_init();
 	memory_reset();
 	vera_spi_init();
@@ -312,10 +316,17 @@ machine_reset()
 }
 
 void
+machine_nmi()
+{
+	nmi6502();
+}
+
+void
 machine_paste(char *s)
 {
 	if (s) {
 		paste_text = s;
+		clipboard_buffer = s; // so that we can free this later
 		pasting_bas = true;
 	}
 }
@@ -327,81 +338,6 @@ machine_toggle_warp()
 	timing_init();
 }
 
-uint8_t
-iso8859_15_from_unicode(uint32_t c)
-{
-	// line feed -> carriage return
-	if (c == '\n') {
-		return '\r';
-	}
-
-	// translate Unicode characters not part of Latin-1 but part of Latin-15
-	switch (c) {
-		case 0x20ac: // '€'
-			return 0xa4;
-		case 0x160: // 'Š'
-			return 0xa6;
-		case 0x161: // 'š'
-			return 0xa8;
-		case 0x17d: // 'Ž'
-			return 0xb4;
-		case 0x17e: // 'ž'
-			return 0xb8;
-		case 0x152: // 'Œ'
-			return 0xbc;
-		case 0x153: // 'œ'
-			return 0xbd;
-		case 0x178: // 'Ÿ'
-			return 0xbe;
-	}
-
-	// remove Unicode characters part of Latin-1 but not part of Latin-15
-	switch (c) {
-		case 0xa4: // '¤'
-		case 0xa6: // '¦'
-		case 0xa8: // '¨'
-		case 0xb4: // '´'
-		case 0xb8: // '¸'
-		case 0xbc: // '¼'
-		case 0xbd: // '½'
-		case 0xbe: // '¾'
-			return '?';
-	}
-
-	// all other Unicode characters are also unsupported
-	if (c >= 256) {
-		return '?';
-	}
-
-	// everything else is Latin-15 already
-	return c;
-}
-
-uint32_t
-unicode_from_iso8859_15(uint8_t c)
-{
-	// translate Latin-15 characters not part of Latin-1
-	switch (c) {
-		case 0xa4:
-			return 0x20ac; // '€'
-		case 0xa6:
-			return 0x160; // 'Š'
-		case 0xa8:
-			return 0x161; // 'š'
-		case 0xb4:
-			return 0x17d; // 'Ž'
-		case 0xb8:
-			return 0x17e; // 'ž'
-		case 0xbc:
-			return 0x152; // 'Œ'
-		case 0xbd:
-			return 0x153; // 'œ'
-		case 0xbe:
-			return 0x178; // 'Ÿ'
-		default:
-			return c;
-	}
-}
 
 // converts the character to UTF-8 and prints it
 static void
@@ -474,8 +410,6 @@ usage()
 	printf("\tkeyboard.\n");
 	printf("-run\n");
 	printf("\tStart the -prg/-bas program using RUN\n");
-	printf("-geos\n");
-	printf("\tLaunch GEOS at startup.\n");
 	printf("-warp\n");
 	printf("\tEnable warp mode, run emulator as fast as possible.\n");
 	printf("-echo [{iso|raw}]\n");
@@ -507,6 +441,10 @@ usage()
 	printf("\tScaling algorithm quality\n");
 	printf("-widescreen\n");
 	printf("\tStretch output to 16:9 resolution to mimic display of a widescreen monitor.\n");
+	printf("-fullscreen\n");
+	printf("\tStart up in fullscreen mode instead of in a window.\n");
+	printf("-opacity (0.0,...,1.0)\n");
+	printf("\tSet the opacity value (0.0 for transparent, 1.0 for opaque) of the window. (default: %.1f)\n", window_opacity);
 	printf("-debug [<address>]\n");
 	printf("\tEnable debugger. Optionally, set a breakpoint\n");
 	printf("-randram\n");
@@ -549,6 +487,9 @@ usage()
 	printf("\API based web server running on port :9009\n");
 	printf("\tApproximate mid-line raster effects when changing tile, sprite,\n");
 	printf("\tand palette data. Requires a fast host CPU.\n");
+	printf("-enable-ym2151-irq\n");
+	printf("\tConnect the YM2151 IRQ source to the emulated CPU. This option increases\n");
+	printf("\tCPU usage as audio render is triggered for every CPU instruction.\n");
 #ifdef TRACE
 	printf("-trace [<address>]\n");
 	printf("\tPrint instruction trace. Optionally, a trigger address\n");
@@ -580,8 +521,6 @@ main(int argc, char **argv)
 	char *prg_path = NULL;
 	char *bas_path = NULL;
 	char *sdcard_path = NULL;
-	char *cartridge_path = NULL;
-	bool run_geos = false;
 	bool run_test = false;
 	int test_number = 0;
 	int audio_buffers = 8;
@@ -666,10 +605,6 @@ main(int argc, char **argv)
 			bas_path = argv[0];
 			argc--;
 			argv++;
-		} else if (!strcmp(argv[0], "-geos")) {
-			argc--;
-			argv++;
-			run_geos = true;
 		} else if (!strcmp(argv[0], "-test")) {
 			argc--;
 			argv++;
@@ -918,6 +853,19 @@ main(int argc, char **argv)
 			argc--;
 			argv++;
 			screen_x_scale = 4.0/3;
+		} else if (!strcmp(argv[0], "-fullscreen")) {
+			argc--;
+			argv++;
+			fullscreen = true;
+		} else if (!strcmp(argv[0], "-opacity")) {
+			argc--;
+			argv++;
+			if (!argc || argv[0][0] == '-') {
+				usage();
+			}
+			window_opacity = strtof(argv[0], NULL);
+			argc--;
+			argv++;
 		} else if (!strcmp(argv[0], "-sound")) {
 			argc--;
 			argv++;
@@ -954,7 +902,7 @@ main(int argc, char **argv)
 			if (!argc || argv[0][0] == '-') {
 				usage();
 			}
-			fsroot_path = argv[0];
+			fsroot_path = (uint8_t *)argv[0];
 			argc--;
 			argv++;
 		} else if (!strcmp(argv[0], "-startin")) {
@@ -963,7 +911,7 @@ main(int argc, char **argv)
 			if (!argc || argv[0][0] == '-') {
 				usage();
 			}
-			startin_path = argv[0];
+			startin_path = (uint8_t *)argv[0];
 			argc--;
 			argv++;
 		} else if (!strcmp(argv[0], "-noemucmdkeys")) {
@@ -1007,10 +955,6 @@ main(int argc, char **argv)
 			argc--;
 			argv++;
 			enable_midline = true;
-		} else if (!strcmp(argv[0], "-remote-debugger")) {
-			argc--;
-			argv++;
-			remote_debugger = true;
 		} else {
 			usage();
 		}
@@ -1075,9 +1019,6 @@ main(int argc, char **argv)
 		SDL_RWclose(bas_file);
 	}
 
-	if (run_geos) {
-		paste_text = "GEOS\r";
-	}
 	if (run_test) {
 		paste_text = paste_text_data;
 		snprintf(paste_text, sizeof(paste_text_data), "TEST %d\r", test_number);
@@ -1094,7 +1035,7 @@ main(int argc, char **argv)
 	if (!headless) {
 		SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO);
 		audio_init(audio_dev_name, audio_buffers);
-		video_init(window_scale, screen_x_scale, scale_quality);
+		video_init(window_scale, screen_x_scale, scale_quality, fullscreen, window_opacity);
 	}
 
 	if (remote_debugger) {
@@ -1125,6 +1066,11 @@ main(int argc, char **argv)
 	emulator_loop(NULL);
 #endif
 
+	main_shutdown();
+	return 0;
+}
+
+void main_shutdown() {
 	if (!headless){
 		wav_recorder_shutdown();
 		audio_close();
@@ -1167,7 +1113,6 @@ main(int argc, char **argv)
 	}
 #endif
 
-	return 0;
 }
 
 bool
@@ -1336,6 +1281,7 @@ emulator_loop(void *param)
 {
 	uint32_t old_clockticks6502 = clockticks6502;
 	for (;;) {
+		if (smc_requested_reset) machine_reset();
 
 		if (testbench && pc == 0xfffd){
 			testbench_init();
@@ -1505,6 +1451,14 @@ emulator_loop(void *param)
 #endif
 		}
 
+		// The optimization from the opportunistic batching of audio rendering 
+		// is lost if we need to track the YM2151 IRQ, so it has been made a
+		// command-line switch that's disabled by default.
+		if (ym2151_irq_support) {
+			audio_render();
+			if (YM_irq()) irq6502();
+		}
+
 		if (video_get_irq_out() || via1_irq() || (has_via2 && via2_irq())) {
 //			printf("IRQ!\n");
 			irq6502();
@@ -1593,7 +1547,7 @@ emulator_loop(void *param)
 #if 0 // enable this for slow pasting
 		if (!(instruction_counter % 100000))
 #endif
-		while (pasting_bas && RAM[NDX] < 10) {
+		while (pasting_bas && RAM[NDX] < 10 && !(status & 0x04)) {
 			uint32_t c;
 			int e = 0;
 
@@ -1612,6 +1566,10 @@ emulator_loop(void *param)
 			} else {
 				pasting_bas = false;
 				paste_text = NULL;
+				if (clipboard_buffer) {
+					SDL_free(clipboard_buffer);
+					clipboard_buffer = NULL;
+				}
 			}
 		}
 	}

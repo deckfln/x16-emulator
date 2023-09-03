@@ -105,7 +105,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <AdditionalIncludeDirectories>$(SrcDir);$(VendorDir)\SDL2-2.0.10\include;$(VendorDir)\nativefiledialog\src\include;$(VendorDir)\mINI\src\mini;$(VendorDir)\lodepng;$(VendorDir)\rtmidi;$(VendorDir)\ymfm\src;$(VendorDir)\r8brain-free-src;$(SrcDir)\compat</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SrcDir);$(VendorDir)\SDL2-2.0.10\include;$(VendorDir)\nativefiledialog\src\include;$(VendorDir)\mINI\src\mini;$(VendorDir)\lodepng;$(VendorDir)\rtmidi;$(VendorDir)\ymfm\src;$(VendorDir)\r8brain-free-src;$(SrcDir)\compat;$(SolutionDir)\src\extern\ymfm\src</AdditionalIncludeDirectories>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
@@ -145,12 +145,20 @@
     <ClInclude Include="..\src\cpu\tables.h" />
     <ClInclude Include="..\src\debugger.h" />
     <ClInclude Include="..\src\disasm.h" />
-    <ClInclude Include="..\src\extern\src\ym2151.h" />
+    <ClInclude Include="..\src\extern\include\gif.h" />
+    <ClInclude Include="..\src\extern\include\stb_image_write.h" />
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm.h" />
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_adpcm.h" />
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_fm.ipp" />
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_opl.h" />
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_opm.h" />
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_pcm.h" />
     <ClInclude Include="..\src\files.h" />
     <ClInclude Include="..\src\glue.h" />
     <ClInclude Include="..\src\i2c.h" />
     <ClInclude Include="..\src\icon.h" />
     <ClInclude Include="..\src\ieee.h" />
+    <ClInclude Include="..\src\iso_8859_15.h" />
     <ClInclude Include="..\src\joystick.h" />
     <ClInclude Include="..\src\keyboard.h" />
     <ClInclude Include="..\src\memory.h" />
@@ -171,6 +179,13 @@
     <ClInclude Include="..\src\via.h" />
     <ClInclude Include="..\src\video.h" />
     <ClInclude Include="..\src\wav_recorder.h" />
+    <ClInclude Include="libunistd\portable\bsd_string.h" />
+    <ClInclude Include="libunistd\portable\stub.h" />
+    <ClInclude Include="libunistd\unistd\dirent.h" />
+    <ClInclude Include="libunistd\unistd\linux\limits.h" />
+    <ClInclude Include="libunistd\unistd\sigaction.h" />
+    <ClInclude Include="libunistd\unistd\sys\sys_types.h" />
+    <ClInclude Include="libunistd\unistd\unistd.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\audio.c" />
@@ -178,11 +193,15 @@
     <ClCompile Include="..\src\cpu\fake6502.c" />
     <ClCompile Include="..\src\debugger.c" />
     <ClCompile Include="..\src\disasm.c" />
-    <ClCompile Include="..\src\extern\src\ym2151.c" />
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_adpcm.cpp" />
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_opl.cpp" />
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_opm.cpp" />
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_pcm.cpp" />
     <ClCompile Include="..\src\files.c" />
     <ClCompile Include="..\src\i2c.c" />
     <ClCompile Include="..\src\icon.c" />
     <ClCompile Include="..\src\ieee.c" />
+    <ClCompile Include="..\src\iso_8859_15.c" />
     <ClCompile Include="..\src\javascript_interface.c" />
     <ClCompile Include="..\src\joystick.c" />
     <ClCompile Include="..\src\keyboard.c" />
@@ -202,6 +221,7 @@
     <ClCompile Include="..\src\via.c" />
     <ClCompile Include="..\src\video.c" />
     <ClCompile Include="..\src\wav_recorder.c" />
+    <ClCompile Include="..\src\ymglue.cpp" />
     <ClCompile Include="libunistd\unistd\dirent.cpp" />
     <ClCompile Include="libunistd\unistd\unistd.cpp" />
   </ItemGroup>

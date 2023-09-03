@@ -138,11 +138,44 @@
     <ClInclude Include="..\src\cpu\tables.h">
       <Filter>Fichiers d%27en-tête\cpu</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\extern\src\ym2151.h">
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm.h">
       <Filter>Fichiers d%27en-tête\extern</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\remoted\remoted.h">
-      <Filter>Fichiers d%27en-tête\remoted</Filter>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_adpcm.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_fm.ipp">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_opl.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_opm.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_pcm.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\dirent.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\unistd.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\portable\bsd_string.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\portable\stub.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\sigaction.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\sys\sys_types.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\include\gif.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -227,17 +260,11 @@
     <ClCompile Include="..\src\cpu\fake6502.c">
       <Filter>Fichiers sources\cpu</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\extern\src\ym2151.c">
-      <Filter>Fichiers sources\extern</Filter>
-    </ClCompile>
     <ClCompile Include="libunistd\unistd\dirent.cpp">
       <Filter>Fichiers sources\libunistd</Filter>
     </ClCompile>
     <ClCompile Include="libunistd\unistd\unistd.cpp">
       <Filter>Fichiers sources\libunistd</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\remoted\remoted.c">
-      <Filter>Fichiers sources\remoted</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
