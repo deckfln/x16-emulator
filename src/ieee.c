@@ -1,5 +1,5 @@
 // Commander X16 Emulator
-// Copyright (c) 2022 Michael Steil
+// Copyright (c) 2022, 2023 Michael Steil, et al
 // All rights reserved. License: 2-clause BSD
 
 // Commodore Bus emulation
@@ -36,6 +36,9 @@
 #include "memory.h"
 #include "ieee.h"
 #include "glue.h"
+#include "utf8_encode.h"
+#include "utf8.h"
+#include "iso_8859_15.h"
 #ifdef __MINGW32__
 #include <direct.h>
 // Windows just has to be different
@@ -46,6 +49,10 @@ extern SDL_RWops *prg_file;
 
 #define UNIT_NO 8
 
+#define WILDCARD_ALL 0
+#define WILDCARD_PRG 1
+#define WILDCARD_DIR 2
+
 // Globals
 
 //bool log_ieee = true;
@@ -53,10 +60,10 @@ bool log_ieee = false;
 
 bool ieee_initialized_once = false;
 
-char error[80];
+uint8_t error[80];
 int error_len = 0;
 int error_pos = 0;
-char cmd[80];
+uint8_t cmd[80];
 int cmdlen = 0;
 int namelen = 0;
 int channel = 0;
@@ -65,8 +72,9 @@ bool talking = false;
 bool opening = false;
 bool overwrite = false;
 bool path_exists = false;
+bool prg_consumed = false;
 
-char *hostfscwd = NULL;
+uint8_t *hostfscwd = NULL;
 
 uint8_t dirlist[1024]; // Plenty large to hold a single entry
 int dirlist_len = 0;
@@ -74,16 +82,17 @@ int dirlist_pos = 0;
 bool dirlist_cwd = false; // whether we're doing a cwd dirlist or a normal one
 bool dirlist_eof = true;
 bool dirlist_timestmaps = false;
+bool dirlist_long = false;
 DIR *dirlist_dirp;
-char dirlist_wildcard[256];
-char dirlist_type_filter;
+uint8_t dirlist_wildcard[256];
+uint8_t dirlist_type_filter;
 
 uint16_t cbdos_flags = 0;
 
 const char *blocks_free = "BLOCKS FREE.";
 
 typedef struct {
-	char name[80];
+	uint8_t name[80];
 	bool read;
 	bool write;
 	SDL_RWops *f;
@@ -107,17 +116,28 @@ realpath(const char *path, char *resolved_path) {
 }
 #endif
 
+#define u8strchr(A,B) (uint8_t *)strchr((char *)A,B)
+#define u8strrchr(A,B) (uint8_t *)strrchr((char *)A,B)
+#define u8strcpy(A,B) strcpy((char *)A,(char *)B)
+#define u8strcmp(A,B) strcmp((char *)A,(char *)B)
+#define u8strncmp(A,B,C) strncmp((char *)A,(char *)B,C)
+#define u8strncpy(A,B,C) strncpy((char *)A,(char *)B,C)
+#define u8strlen(A) strlen((char *)A)
+#define u8stat(A,B) stat((char *)A,B)
+#define u8realpath(A,B) (uint8_t *)realpath((char *)A,(char *)B)
+#define u8getcwd(A,B) (uint8_t *)getcwd((char *)A,B)
+
 // Prototypes for some of the static functions
 
 static void clear_error();
 static void set_error(int e, int t, int s);
-static void cchdir(char *dir);
-static int cgetcwd(char *buf, size_t len);
+static void cchdir(uint8_t *dir);
+static int cgetcwd(uint8_t *buf, size_t len);
 static void cseek(int channel, uint32_t pos);
-static void cmkdir(char *dir);
-static void crmdir(char *dir);
-static void cunlink(char *f);
-static void crename(char *f);
+static void cmkdir(uint8_t *dir);
+static void crmdir(uint8_t *dir);
+static void cunlink(uint8_t *f);
+static void crename(uint8_t *f);
 
 // Functions
 
@@ -139,20 +159,63 @@ get_kernal_cbdos_flags(void)
 }
 
 
+static void
+utf8_to_iso_string(uint8_t *dst, const uint8_t *src)
+{
+	int i;
+	int e;
+	uint32_t cp;
+
+	// utf8_decode requires the source string be at least 4 bytes
+	// longer than the string (IOW, 4 terminating nulls)
+	uint8_t *s = malloc(u8strlen(src)+4);
+	memset(s, 0, u8strlen(src)+4);
+	u8strcpy(s, src);
+
+	uint8_t *so = s;
+
+	for (i = 0; *so; i++) {
+		so = utf8_decode(so, &cp, &e);
+		if (e) {
+			dst[i] = '?';
+		} else {
+			switch (cp) {
+				case ',':
+				case '"':
+				case '*':
+				case ':':
+				case '\\':
+				case '<':
+				case '>':
+				case '|':
+					// these are not valid in filenames on FAT32 but might be encountered on hostfs
+					dst[i] = '?';
+					break;
+				default:
+					dst[i] = iso8859_15_from_unicode(cp);
+					break;
+			}
+		}
+	}
+
+	dst[i] = 0;
+	free(s);
+}
+
 // Puts the emulated cwd in buf, up to the maximum length specified by len
 // Turn null termination into a space
 // This is for displaying in the directory header
 static int
-cgetcwd(char *buf, size_t len)
+cgetcwd(uint8_t *buf, size_t len)
 {
 	int o = 0;
-	char l = fsroot_path[strlen(fsroot_path)-1];
+	uint8_t l = fsroot_path[u8strlen(fsroot_path)-1];
 	if (l == '/' || l == '\\')
 		o--;
-	if (strlen(fsroot_path) == strlen(hostfscwd))
-		strncpy(buf, "/", len);
+	if (u8strlen(fsroot_path) == u8strlen(hostfscwd))
+		u8strncpy(buf, "/", len);
 	else 
-		strncpy(buf, hostfscwd+strlen(fsroot_path)+o, len);
+		u8strncpy(buf, hostfscwd+u8strlen(fsroot_path)+o, len);
 	// Turn backslashes into slashes
 	for (o = 0; o < len; o++) {
 		if (buf[o] == 0) buf[o] = ' ';
@@ -162,16 +225,95 @@ cgetcwd(char *buf, size_t len)
 	return 0;
 }
 
-static char *
-parse_dos_filename(const char *name)
+static uint32_t
+case_fold_unicode(uint32_t cp)
+{
+	// ASCII letters, and most of the ISO letters
+	if ((cp >= 0x41 && cp <= 0x5a) || (cp >= 0xc0 && cp <= 0xde)) cp += 0x20;
+	// fold the Š
+	else if (cp == 0x0160) cp = 0x0161;
+	// fold the Ž
+	else if (cp == 0x017d) cp = 0x017e;
+	// fold the Œ
+	else if (cp == 0x0152) cp = 0x0153;
+	// fold the Ÿ
+	else if (cp == 0x0178) cp = 0xff;
+
+	return cp;
+}
+
+static uint8_t
+case_fold_iso(uint8_t c) {
+	uint8_t f = c;
+	// ASCII letters, and most of the ISO letters
+	if ((f >= 0x41 && f <= 0x5a) || (f >= 0xc0 && f <= 0xde)) f += 0x20;
+	// fold the Š
+	else if (f == 0xa6) f = 0xa8;
+	// fold the Ž
+	else if (f == 0xb4) f = 0xb8;
+	// fold the Œ
+	else if (f == 0xbc) f = 0xbd;
+	// fold the Ÿ
+	else if (f == 0xbe) f = 0xff;
+
+	return f;
+}
+
+
+static uint32_t
+utf8_to_codepoint(uint8_t *str, int *off)
+{
+	uint32_t cp;
+	int e;
+
+	// utf8_decode requires the source string be at least 4 bytes
+	// longer than the string (IOW, 4 terminating nulls)
+	uint8_t *s = malloc(u8strlen(str+(*off))+4);
+	memset(s, 0, u8strlen(str+(*off))+4);
+	u8strcpy(s, str+(*off));
+	
+	uint8_t *so = utf8_decode(s, &cp, &e);
+
+	*off += (so - s) - 1;
+	free(s);
+
+	if (e) {
+		cp = '?';
+	}
+
+	return cp;
+}
+
+
+// compare two characters in a UTF-8 string
+// in a case-insensitive manner,
+// return value is cp2 - cp1 after case folding
+// hence will be zero on match
+static int
+u8compare_utf8_char_i(uint8_t *str1, uint8_t *str2, int *off1, int *off2)
+{
+	uint32_t cp1, cp2;
+
+	// these functions will increment *off1/*off2 to the
+	// byte before the next character if the UTF-8
+	// strings are multi-byte
+	cp1 = utf8_to_codepoint(str1, off1);
+	cp2 = utf8_to_codepoint(str2, off2);
+
+	return case_fold_unicode(cp2) - case_fold_unicode(cp1);
+}
+
+
+static uint8_t *
+parse_dos_filename(const uint8_t *name, bool dirhandling)
 {
 	// in case the name starts with something with special meaning,
 	// such as @0:
-	char *name_ptr;
-	char *newname = malloc(strlen(name)+1);
+	uint8_t *name_ptr = NULL;
+	uint8_t *newname = malloc(u8strlen(name)+1);
 	int i, j;
 
-	newname[strlen(name)] = 0;
+	newname[u8strlen(name)] = 0;
 	
 	overwrite = false;
 
@@ -187,31 +329,42 @@ parse_dos_filename(const char *name)
 	// This routine only parses the bits before the ':'
 	// and normalizes directory parts by attaching them to the name part
 
-	// resolve_path() is responsible for resolving absolute and relative
+	// resolve_path*() is responsible for resolving absolute and relative
 	// paths, and for processing the wildcard option
 
+	name_ptr = u8strchr(name,':');
+	if (dirhandling && !name_ptr)
+		name_ptr = (uint8_t *)(name+u8strlen(name));
 
-	if ((name_ptr = strchr(name,':'))) {
+	if (name_ptr) {
 		name_ptr++;
 		i = 0;
 		j = 0;
 
-		// @ is overwrite flag
-		if (name[i] == '@') {
-			overwrite = true;
-			i++;
+
+		if (!dirhandling) {
+			// @ is overwrite flag
+			if (name[i] == '@') {
+				overwrite = true;
+				i++;
+			}
+
+			// Medium, we don't care what this number is
+			while (name[i] >= '0' && name[i] <= '9')
+				i++;
 		}
-
-		// Medium, we don't care what this number is
-		while (name[i] >= '0' && name[i] <= '9')
-			i++;
-
 
 		// Directory name
 		if (name[i] == '/') {
 			i++;
 			for (; name+i+1 < name_ptr; i++, j++) {
 				newname[j] = name[i];
+			}
+
+			// mangled directory name (single slash?)
+			if (j == 0) {
+				free(newname);
+				return NULL;
 			}
 
 			// Directory portion must end with /
@@ -221,32 +374,38 @@ parse_dos_filename(const char *name)
 			}
 		}
 
-		strcpy(newname+j,name_ptr);
+		u8strcpy(newname+j,name_ptr);
 
 	} else {
-		strcpy(newname,name);
+		u8strcpy(newname,name);
 	}
 
 	return newname;
 }
 
 // Returns a ptr to malloc()ed space which must be free()d later, or NULL
-static char *
-resolve_path(const char *name, bool must_exist)
+static uint8_t *
+resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 {
 	path_exists = false;
 	clear_error();
 	// Resolve the filename in the context of the emulated cwd
 	// allocate plenty of string space
-	char *tmp = malloc(strlen(name)+strlen(hostfscwd)+2);
-	char *c;
-	char *d;
-	char *ret;
+	uint8_t *tmp = malloc(u8strlen(name)+u8strlen(hostfscwd)+2);
+	uint8_t *tmp2 = malloc(u8strlen(name)+u8strlen(hostfscwd)+2);
+	uint8_t *c;
+	uint8_t *d;
+	uint8_t *ret;
 	DIR *dirp;
 	struct dirent *dp;
+	struct stat st;
 	int i;
+	int j;
+	bool has_wildcard_chars = false;
 
-	if (tmp == NULL) {
+	if (tmp == NULL || tmp2 == NULL) {
+		if (tmp) free(tmp);
+		if (tmp2) free(tmp2);
 		set_error(0x70, 0, 0);
 		return NULL;
 	}
@@ -255,98 +414,141 @@ resolve_path(const char *name, bool must_exist)
 	// slash(es) and all, otherwise append it to the cwd, but with a /
 	// in between
 	if (name[0] == '/' || name[0] == '\\') { // absolute
-		strcpy(tmp, fsroot_path);
-		strcpy(tmp+strlen(fsroot_path), name);
+		u8strcpy(tmp, fsroot_path);
+		u8strcpy(tmp+u8strlen(fsroot_path), name);
 	} else { // relative
-		strcpy(tmp, hostfscwd);
-		tmp[strlen(hostfscwd)] = '/';
-		strcpy(tmp+strlen(hostfscwd)+1, name);
+		u8strcpy(tmp, hostfscwd);
+		tmp[u8strlen(hostfscwd)] = '/';
+		u8strcpy(tmp+u8strlen(hostfscwd)+1, name);
 	}
 
-	if (strchr(tmp,'*') || strchr(tmp,'?')) { // oh goodie, a wildcard
-		// we have to search the directory for the first occurrence
-		// in directory order
+	// keep the original parsed name
+	u8strcpy(tmp2, tmp);
 
-		c = strrchr(tmp,'\\');
-		d = strrchr(tmp,'/');
+	if (u8strchr(tmp,'*') || u8strchr(tmp,'?')) { // oh goodie, a wildcard
+		has_wildcard_chars = true;
+	}
+	// We have to search the directory for the first occurrence
+	// in directory order.
 
-		if (c == NULL && d == NULL) { // This should never happen
-			free(tmp);
-			set_error(0x62, 0, 0);
-			return NULL;
-		}
+	c = u8strrchr(tmp,'\\');
+	d = u8strrchr(tmp,'/');
 
-		// Chop off ret at the last path separator
-		// and set c to point at the element with the wildcard
-		// pattern
-		if (c > d) {
-			*c = 0;
-			c++;
-		} else {
-			*d = 0;
-			c = d+1;
-		}
+	if (c == NULL && d == NULL) { // This should never happen
+		free(tmp);
+		free(tmp2);
+		set_error(0x62, 0, 0);
+		return NULL;
+	}
 
-		if (!(dirp = opendir(tmp))) { // Directory couldn't be opened
-			free(tmp);
-			set_error(0x62, 0, 0);
-			return NULL;
-		}
+	// Chop off ret at the last path separator
+	// and set c to point at the element with the wildcard
+	// pattern
+	if (c > d) {
+		*c = 0;
+		c++;
+	} else {
+		*d = 0;
+		c = d+1;
+	}
 
-		ret = NULL;
+	// XXX
+	//
+	// tmp could have been populated with path parts that have not been checked
+	// this will fail on case-sensitive filesystems
+	// but if the user did not specify a path part in their filename
+	// we should be able to resolve the new part of the name
+	// we'll probably want to fix this at some point
+	// but it requires some thought
 
-		bool found = false;
+	if (!(dirp = opendir((char *)tmp))) { // Directory couldn't be opened
+		free(tmp);
+		free(tmp2);
+		set_error(0x62, 0, 0);
+		return NULL;
+	}
 
-		while ((dp = readdir(dirp))) {
-			// in a wildcard match that starts at first position, leading dot filenames are not considered
-			if ((*c == '*' || *c == '?') && *(dp->d_name) == '.')
-				continue;
-			for (i = 0; i < strlen(c) && i < strlen(dp->d_name); i++) {
-				if (c[i] == '*') {
-					found = true;
-					break;
-				} else if (c[i] == '?') {
-					continue;
-				} else if (c[i] != (dp->d_name)[i]) {
-					break;
-				}
-			}
+	ret = NULL;
 
-			// If we reach the end of both strings, it's a match
-			if (i == strlen(dp->d_name) && i == strlen(c)) 
+	bool found = false;
+
+	while ((dp = readdir(dirp))) {
+		// in a wildcard match that starts at first position, leading dot filenames are not considered
+		if ((*c == '*' || *c == '?') && *(dp->d_name) == '.')
+			continue;
+		for (i = 0, j = 0; j < u8strlen(c) && i < u8strlen(dp->d_name); i++, j++) {
+			if (c[j] == '*') {
 				found = true;
-
-			if (found) { // simple wildcard match
-				ret = malloc(strlen(tmp)+strlen(dp->d_name)+2);
-				if (ret == NULL) { // memory allocation error
-					free(tmp);
-					closedir(dirp);
-					set_error(0x70, 0, 0);
-					return NULL;
-				}
-				strcpy(ret, tmp);
-				ret[strlen(tmp)] = '/';
-				strcpy(ret+strlen(tmp)+1, dp->d_name);
-				free(tmp);
+				break;
+			} else if (c[j] == '?') {
+				// '?' needs to eat the extra UTF-8 bytes if applicable
+				if (((dp->d_name)[i] & 0xe0) == 0xc0) i++;
+				else if (((dp->d_name)[i] & 0xf0) == 0xe0) i+=2;
+				else if (((dp->d_name)[i] & 0xf8) == 0xf0) i+=3;
+				continue;
+			} else if (u8compare_utf8_char_i(c, (uint8_t *)(dp->d_name), &j, &i)) {
 				break;
 			}
 		}
 
-		closedir(dirp);
+		// If we reach the end of both strings, it's a match
+		if (i == u8strlen(dp->d_name) && j == u8strlen(c))
+			found = true;
 
-		if (!ret) { // No wildcard match
-			free(tmp);
-			set_error(0x62, 0, 0);
-			return NULL;
+		// If we reach the end of the filename, but the next char
+		// in the search string is *, then it's also a match
+		else if (i == u8strlen(dp->d_name) && c[j] == '*')
+			found = true;
+
+		if (found) { // simple wildcard match
+			ret = malloc(u8strlen(tmp)+u8strlen(dp->d_name)+2);
+			if (ret == NULL) { // memory allocation error
+				free(tmp);
+				free(tmp2);
+				closedir(dirp);
+				set_error(0x70, 0, 0);
+				return NULL;
+			}
+			u8strcpy(ret, tmp);
+			ret[u8strlen(tmp)] = '/';
+			u8strcpy(ret+u8strlen(tmp)+1, dp->d_name);
+			if (wildcard_filetype) {
+				u8stat(ret, &st);
+				// in a wildcard match where the filetype is wrong, mark as not found
+				// and continue
+				if (wildcard_filetype == WILDCARD_DIR && !S_ISDIR(st.st_mode)) {
+					free(ret);
+					ret = NULL;
+					found = false;
+					continue;
+				} else if (wildcard_filetype == WILDCARD_PRG && !S_ISREG(st.st_mode)) {
+					free(ret);
+					ret = NULL;
+					found = false;
+					continue;
+				}
+			}
+			break;
 		}
+	}
+	closedir(dirp);
 
-		tmp = ret; // section after this expects the topic to be in tmp
+	free(tmp);
 
+	if (ret) { // We had a match
+		free(tmp2);
+		tmp = ret;
+	} else if (has_wildcard_chars) {
+		// our original query had * or ? and we didn't find it
+		free(tmp2);
+		set_error(0x62, 0, 0);
+		return NULL;
+	} else { // reset tmp to the original name
+		tmp = tmp2;
 	}
 
-
 	// now resolve the path using OS routines
-	ret = realpath(tmp, NULL);
+	ret = u8realpath(tmp, NULL);
 	free(tmp);
 
 	if (ret == NULL) {
@@ -356,20 +558,20 @@ resolve_path(const char *name, bool must_exist)
 		} else {
 			// path does not exist, but as long as everything but the final
 			// path element exists, we're still okay.
-			tmp = malloc(strlen(name)+1);
+			tmp = malloc(u8strlen(name)+1);
 			if (tmp == NULL) {
 				set_error(0x70, 0, 0);
 				return NULL;
 			}
-			strcpy(tmp, name);
-			c = strrchr(tmp, '/');
+			u8strcpy(tmp, name);
+			c = u8strrchr(tmp, '/');
 			if (c == NULL)
-				c = strrchr(tmp, '\\');
+				c = u8strrchr(tmp, '\\');
 			if (c != NULL)
 				*c = 0; // truncate string here
 
 			// assemble a path with what we have left
-			ret = malloc(strlen(tmp)+strlen(hostfscwd)+2);
+			ret = malloc(u8strlen(tmp)+u8strlen(hostfscwd)+2);
 			if (ret == NULL) {
 				free(tmp);
 				set_error(0x70, 0, 0);
@@ -377,12 +579,12 @@ resolve_path(const char *name, bool must_exist)
 			}
 
 			if (name[0] == '/' || name[0] == '\\') { // absolute
-				strcpy(ret, fsroot_path);
-				strcpy(ret+strlen(fsroot_path), tmp);
+				u8strcpy(ret, fsroot_path);
+				u8strcpy(ret+u8strlen(fsroot_path), tmp);
 			} else { // relative
-				strcpy(ret, hostfscwd);
-				*(ret+strlen(hostfscwd)) = '/';
-				strcpy(ret+strlen(hostfscwd)+1, tmp);
+				u8strcpy(ret, hostfscwd);
+				*(ret+u8strlen(hostfscwd)) = '/';
+				u8strcpy(ret+u8strlen(hostfscwd)+1, tmp);
 			}
 
 			free(tmp);
@@ -390,7 +592,7 @@ resolve_path(const char *name, bool must_exist)
 			// if we found a path separator in the name string
 			// we check everything up to that final separator
 			if (c != NULL) {
-				tmp = realpath(ret, NULL);
+				tmp = u8realpath(ret, NULL);
 				free(ret);
 				if (tmp == NULL) {
 					// missing parent path element too
@@ -400,14 +602,14 @@ resolve_path(const char *name, bool must_exist)
 					free(tmp);
 					// found everything up to the parent path element
 					// restore ret to original case
-					ret = malloc(strlen(name)+strlen(hostfscwd)+2);
+					ret = malloc(u8strlen(name)+u8strlen(hostfscwd)+2);
 					if (ret == NULL) {
 						set_error(0x70, 0, 0);
 						return NULL;
 					}
-					strcpy(ret, hostfscwd);
-					ret[strlen(hostfscwd)] = '/';
-					strcpy(ret+strlen(hostfscwd)+1, name);
+					u8strcpy(ret, hostfscwd);
+					ret[u8strlen(hostfscwd)] = '/';
+					u8strcpy(ret+u8strlen(hostfscwd)+1, name);
 				}
 			}
 		}
@@ -420,19 +622,19 @@ resolve_path(const char *name, bool must_exist)
 
 
 	// Prevent resolving outside the fsroot_path
-	if (strlen(fsroot_path) > strlen(ret)) {
+	if (u8strlen(fsroot_path) > u8strlen(ret)) {
 		free(ret);
 		set_error(0x62, 0, 0);
 		return NULL;
-	} else if (strncmp(fsroot_path, ret, strlen(fsroot_path))) {
+	} else if (u8strncmp(fsroot_path, ret, u8strlen(fsroot_path))) {
 		free(ret);
 		set_error(0x62, 0, 0);
 		return NULL;
-	} else if (strlen(fsroot_path) < strlen(ret) &&
-	           fsroot_path[strlen(fsroot_path)-1] != '/' &&
-			   fsroot_path[strlen(fsroot_path)-1] != '\\' &&
-	           ret[strlen(fsroot_path)] != '/' &&
-	           ret[strlen(fsroot_path)] != '\\')
+	} else if (u8strlen(fsroot_path) < u8strlen(ret) &&
+	           fsroot_path[u8strlen(fsroot_path)-1] != '/' &&
+			   fsroot_path[u8strlen(fsroot_path)-1] != '\\' &&
+	           ret[u8strlen(fsroot_path)] != '/' &&
+	           ret[u8strlen(fsroot_path)] != '\\')
 	{
 		// ret matches beginning of fsroot_path,
 		// end of fsroot_path is not a path-separator,
@@ -450,47 +652,67 @@ resolve_path(const char *name, bool must_exist)
 }
 
 
+static uint8_t *
+resolve_path_iso(const uint8_t *name, bool must_exist, int wildcard_filetype)
+{
+	uint8_t *ret;
+	uint8_t *buf;
+	int i, j;
+	uint32_t cp;
+
+	buf = malloc(u8strlen(name)*3+1);
+
+	for (i = 0, j = 0; name[i]; i++) {
+		cp = unicode_from_iso8859_15(name[i]);
+		j += utf8_encode((char *)buf+j, cp);
+	}
+
+	ret = resolve_path_utf8(buf, must_exist, wildcard_filetype);
+	free(buf);
+	return ret;
+}
 
 static int
-create_directory_listing(uint8_t *data, char *dirstring)
+create_directory_listing(uint8_t *data, uint8_t *dirstring)
 {
 	uint8_t *data_start = data;
 
 	dirlist_eof = true;
 	dirlist_cwd = false;
-	int i = 1;
+	int i = 0;
 	int j;
 
 	
 	dirlist_timestmaps = false;
+	dirlist_long = false;
 	dirlist_type_filter = 0;
 	dirlist_wildcard[0] = 0;
 
 	// Here's where we parse out directory listing options
 	// Such as "$=T:MATCH*=P"
 
-	// position 0 is assumed to be $
-	// so i starts at 1
-	while (i < strlen(dirstring)) {
-		if (dirstring[i] == '=') {
-			i++;
-			if (dirstring[i] == 'T')
-				dirlist_timestmaps = true;
-		} else if (dirstring[i] == ':') {
+	while (i < u8strlen(dirstring)) {
+		if (dirstring[i] == ':' || i == 0) {
 			i++;
 			j = 0;
-			while (i < strlen(dirstring)) {
+			while (i < u8strlen(dirstring)) {
+				if (i == 1 && dirstring[i] == ':')
+					i++;
 				if (dirstring[i] == '=' || dirstring[i] == 0) {
-					dirlist_wildcard[j] = 0;
-
 					if (dirstring[++i] == 'D')
 						dirlist_type_filter = 'D';
-					else if (dirstring[i] == 'P')
+					else if (dirstring[i] == 'P' && i != 2)
 						dirlist_type_filter = 'P';
-
+					else if (dirstring[i] == 'T' && i == 2)
+						dirlist_timestmaps = true;
+					else if (dirstring[i] == 'L' && i == 2) {
+						dirlist_timestmaps = true;
+						dirlist_long = true;
+					}
 					break;
 				} else {
 					dirlist_wildcard[j++] = dirstring[i++];
+					dirlist_wildcard[j] = 0;
 				}
 			}
 		}
@@ -511,7 +733,7 @@ create_directory_listing(uint8_t *data, char *dirstring)
 	for (int i = 0; i < 16; i++) {
 		*data++ = ' ';
 	}
-	if (cgetcwd((char *)data - 16, 16)) {
+	if (cgetcwd(data - 16, 16)) {
 		return false;
 	}
 	*data++ = '"';
@@ -523,7 +745,7 @@ create_directory_listing(uint8_t *data, char *dirstring)
 	*data++ = ' ';
 	*data++ = 0;
 
-	if (!(dirlist_dirp = opendir(hostfscwd))) {
+	if (!(dirlist_dirp = opendir((char *)hostfscwd))) {
 		return 0;
 	}
 	dirlist_eof = false;
@@ -536,20 +758,31 @@ continue_directory_listing(uint8_t *data)
 	uint8_t *data_start = data;
 	struct stat st;
 	struct dirent *dp;
-	int file_size;
-	char *tmpnam;
+	size_t file_size;
+	uint8_t *tmpnam;
 	bool found;
 	int i;
 
 	while ((dp = readdir(dirlist_dirp))) {
-		size_t namlen = strlen(dp->d_name);
-		tmpnam = resolve_path(dp->d_name, true);
-		if (tmpnam == NULL) continue;
-		stat(tmpnam, &st);
-		free(tmpnam);
-
 		// Type match
 		if (dirlist_type_filter) {
+			// Because resolving the path within the hostfs
+			// logic is expensive, and could keep us here for multiple seconds
+			// when directories are very large, it is much faster and gets us
+			// past the negative matches of the filter ASAP if we do a quick
+			// stat().
+			//
+			// The later logic can validate if the path resolves to something
+			// within the hostfs root or not.
+			size_t nl = u8strlen(dp->d_name);
+			size_t pl = u8strlen(hostfscwd);
+			uint8_t *tn = malloc(nl+pl+3);
+			u8strcpy(tn, hostfscwd);
+			*(tn+pl) = '/';
+			u8strcpy(tn+pl+1, dp->d_name);
+			u8stat(tn, &st);
+			free(tn);
+
 			switch (dirlist_type_filter) {
 				case 'D':
 					if (!S_ISDIR(st.st_mode))
@@ -562,50 +795,84 @@ continue_directory_listing(uint8_t *data)
 			}
 		}
 
+		size_t namlen = u8strlen(dp->d_name);
+		tmpnam = resolve_path_utf8((uint8_t *)dp->d_name, true, WILDCARD_ALL);
+		if (tmpnam == NULL) continue;
+		u8stat(tmpnam, &st);
+		free(tmpnam);
+
 		// don't show the . or .. in the root directory
 		// this behaves like SD card/FAT32
-		if (!strcmp("..",dp->d_name) || !strcmp(".",dp->d_name)) {
-			if (!strcmp(hostfscwd,fsroot_path)) {
+		if (!u8strcmp("..",dp->d_name) || !u8strcmp(".",dp->d_name)) {
+			if (!u8strcmp(hostfscwd,fsroot_path)) {
 				continue;
 			}
 		}
 
+		tmpnam = malloc(namlen+1);
+		utf8_to_iso_string(tmpnam, (uint8_t *)dp->d_name);
+
 		if (dirlist_wildcard[0]) { // wildcard match selected
 			// in a wildcard match that starts at first position, leading dot filenames are not considered
-			if ((dirlist_wildcard[0] == '*' || dirlist_wildcard[0] == '?') && *(dp->d_name) == '.')
+			if ((dirlist_wildcard[0] == '*' || dirlist_wildcard[0] == '?') && *(tmpnam) == '.')
 				continue;
 
 			found = false;
-			for (i = 0; i < strlen(dirlist_wildcard) && i < strlen(dp->d_name); i++) {
+			for (i = 0; i < u8strlen(dirlist_wildcard) && i < u8strlen(tmpnam); i++) {
 				if (dirlist_wildcard[i] == '*') {
 					found = true;
 					break;
 				} else if (dirlist_wildcard[i] == '?') {
 					continue;
-				} else if (dirlist_wildcard[i] != (dp->d_name)[i]) {
+				} else if (case_fold_iso(dirlist_wildcard[i]) != case_fold_iso((tmpnam)[i])) {
 					break;
 				}
 			}
 
 			// If we reach the end of both strings, it's a match
-			if (i == strlen(dp->d_name) && i == strlen(dirlist_wildcard)) 
+			if (i == u8strlen(tmpnam) && i == u8strlen(dirlist_wildcard))
+				found = true;
+
+			// If we reach the end of the filename and the following character in
+			// the wildcard string is *, it's also a match
+			else if (i == u8strlen(tmpnam) && dirlist_wildcard[i] == '*')
 				found = true;
 
 			if (!found) continue;
-		}
-
-
-		file_size = (st.st_size + 255)/256;
-		if (file_size > 0xFFFF) {
-			file_size = 0xFFFF;
 		}
 
 		// link
 		*data++ = 1;
 		*data++ = 1;
 
-		*data++ = file_size & 0xFF;
-		*data++ = file_size >> 8;
+		if (dirlist_long) {
+			unsigned char unit = 'K';
+			file_size = (st.st_size + 1023)/1024;
+			if (file_size > 0xFFFF) {
+				file_size /= 1024;
+				unit = 'M';
+			}
+			if (file_size > 0xFFFF) {
+				file_size /= 1024;
+				unit = 'G';
+			}
+			if (file_size > 0xFFFF) {
+				file_size = 0xFFFF;
+			}
+
+			*data++ = file_size & 0xFF;
+			*data++ = file_size >> 8;
+			*data++ = unit;
+			*data++ = 'B';
+		} else {
+			file_size = (st.st_size + 255)/256;
+			if (file_size > 0xFFFF) {
+				file_size = 0xFFFF;
+			}
+			*data++ = file_size & 0xFF;
+			*data++ = file_size >> 8;
+		}
+
 		if (file_size < 1000) {
 			*data++ = ' ';
 			if (file_size < 100) {
@@ -619,7 +886,8 @@ continue_directory_listing(uint8_t *data)
 		//if (namlen > 16) {
 		//	namlen = 16; // TODO hack
 		//}
-		memcpy(data, dp->d_name, namlen);
+		namlen = u8strlen(tmpnam);
+		memcpy(data, tmpnam, namlen);
 		data += namlen;
 		*data++ = '"';
 		for (int i = namlen; i < 16; i++) {
@@ -644,9 +912,26 @@ continue_directory_listing(uint8_t *data)
 			if (localtime_r(&st.st_mtime, &mtime)) {
 				*data++ = ' '; // space before the date
 				data += strftime((char *)data, 20, "%Y-%m-%d %H:%M:%S", &mtime);
+				*data++ = ' '; // space after the date
 			}
 		}
+
+		if (dirlist_long) {
+			// attribute and size go at the end if dirlist_long is active
+			uint8_t attrbyte = 0;
+			if (S_ISDIR(st.st_mode)) attrbyte |= 0x10;
+			if (S_ISREG(st.st_mode)) attrbyte |= 0x20;
+			if (!(st.st_mode & 0200)) attrbyte |= 0x01; // read-only
+			size_t fullsize = st.st_size;
+			if (fullsize > 0xffffffff) {
+				fullsize = 0xffffffff;
+			}
+
+			data += sprintf((char *)data, "%02X %08X ", attrbyte, (unsigned int)fullsize);
+		}
 		
+		free(tmpnam);
+
 		*data++ = 0;
 		return data - data_start;
 	}
@@ -658,8 +943,8 @@ continue_directory_listing(uint8_t *data)
 	*data++ = 255; // "65535"
 	*data++ = 255;
 
-	memcpy(data, blocks_free, strlen(blocks_free));
-	data += strlen(blocks_free);
+	memcpy(data, blocks_free, u8strlen(blocks_free));
+	data += u8strlen(blocks_free);
 	*data++ = 0;
 
 	// link
@@ -691,7 +976,7 @@ create_cwd_listing(uint8_t *data)
 	for (int i = 0; i < 16; i++) {
 		*data++ = ' ';
 	}
-	if (cgetcwd((char *)data - 16, 16)) {
+	if (cgetcwd(data - 16, 16)) {
 		dirlist_eof = true;
 		return 0;
 	}
@@ -704,14 +989,14 @@ create_cwd_listing(uint8_t *data)
 	*data++ = ' ';
 	*data++ = 0;
 
-	char *tmp = malloc(strlen(hostfscwd)+1);
+	uint8_t *tmp = malloc(u8strlen(hostfscwd)+1);
 	if (tmp == NULL) {
 		set_error(0x70, 0, 0);
 		return 0;
 	}
-	int i = strlen(hostfscwd);
-	int j = strlen(fsroot_path);
-	strcpy(tmp,hostfscwd);
+	int i = u8strlen(hostfscwd);
+	int j = u8strlen(fsroot_path);
+	u8strcpy(tmp,hostfscwd);
 
 	for(; i>= j-1; --i) {
 		// find the beginning of a path element
@@ -721,11 +1006,11 @@ create_cwd_listing(uint8_t *data)
 		tmp[i-1]=0;
 
 		if (i < j) {
-			strcpy(tmp+i,"/");
+			u8strcpy(tmp+i,"/");
 		}
 
 		file_size = 0;
-		size_t namlen = strlen(tmp+i);
+		size_t namlen = u8strlen(tmp+i);
 
 		if (!namlen) continue; // there was a doubled path separator
 
@@ -768,8 +1053,8 @@ create_cwd_listing(uint8_t *data)
 	*data++ = 255; // "65535"
 	*data++ = 255;
 
-	memcpy(data, blocks_free, strlen(blocks_free));
-	data += strlen(blocks_free);
+	memcpy(data, blocks_free, u8strlen(blocks_free));
+	data += u8strlen(blocks_free);
 	*data++ = 0;
 
 	// link
@@ -857,8 +1142,8 @@ set_activity(bool active)
 static void
 set_error(int e, int t, int s)
 {
-	snprintf(error, sizeof(error), "%02x,%s,%02d,%02d\r", e, error_string(e), t, s);
-	error_len = strlen(error);
+	snprintf((char *)error, sizeof(error), "%02x,%s,%02d,%02d\r", e, error_string(e), t, s);
+	error_len = u8strlen(error);
 	error_pos = 0;
 	uint8_t cbdos_flags = get_kernal_cbdos_flags();
 	if (e < 0x10 || e == 0x73) {
@@ -877,7 +1162,7 @@ clear_error()
 
 
 static void
-command(char *cmd)
+command(uint8_t *cmd)
 {
 	if (!cmd[0]) {
 		return;
@@ -893,10 +1178,8 @@ command(char *cmd)
 		case 'C': // C (copy), CD (change directory), CP (change partition)
 			switch(cmd[1]) {
 				case 'D': // Change directory
-					if (cmd[2] == ':') {
-						cchdir(cmd+3);
+						cchdir(cmd+2);
 						return;
-					}
 				case 'P': // Change partition
 					set_error(0x02, 0, 0);
 					return;
@@ -911,10 +1194,8 @@ command(char *cmd)
 		case 'M': // MD
 			switch(cmd[1]) {
 				case 'D': // Make directory
-					if (cmd[2] == ':') {
-						cmkdir(cmd+3);
-						return;
-					}
+					cmkdir(cmd+2);
+					return;
 				default: // Memory (not implemented)
 					set_error(0x31, 0, 0);
 					return;
@@ -929,10 +1210,8 @@ command(char *cmd)
 		case 'R': // RD
 			switch(cmd[1]) {
 				case 'D': // Remove directory
-					if (cmd[2] == ':') {
-						crmdir(cmd+3);
-						return;
-					}
+					crmdir(cmd+2);
+					return;
 				default: // Rename 
 					crename(cmd); // Need to parse out the arg in this function
 					return;
@@ -961,20 +1240,35 @@ command(char *cmd)
 }
 
 static void
-cchdir(char *dir)
+cchdir(uint8_t *dir)
 {
 	// The directory name is in dir, coming from the command channel
-	// with the CD: portion stripped off
-	char *resolved;
+	// with the CD portion stripped off
+	uint8_t *parsed;
+	uint8_t *resolved;
 	struct stat st;
 
-	if ((resolved = resolve_path(dir, true)) == NULL) {
+	if (!u8strcmp(dir,":_")) { // turn CD:← into CD:..
+		parsed = parse_dos_filename((uint8_t *)":..", true);
+	} else {
+		parsed = parse_dos_filename(dir, true);
+	}
+
+	if (parsed == NULL) {
+		set_error(0x32, 0, 0);
+		return;
+	}
+	
+	if ((resolved = resolve_path_iso(parsed, true, WILDCARD_DIR)) == NULL) {
+		free(parsed);
 		// error already set
 		return;
 	}
 
+	free(parsed);
+
 	// Is it a directory?
-	if (stat(resolved, &st)) {
+	if (u8stat(resolved, &st)) {
 		// FNF
 		free(resolved);
 		set_error(0x62, 0, 0);
@@ -992,21 +1286,32 @@ cchdir(char *dir)
 }
 
 static void
-cmkdir(char *dir)
+cmkdir(uint8_t *dir)
 {
 	// The directory name is in dir, coming from the command channel
-	// with the MD: portion stripped off
-	char *resolved;
+	// with the MD portion stripped off
+	uint8_t *resolved;
+	uint8_t *parsed;
+
+	parsed = parse_dos_filename(dir, true);
+
+	if (parsed == NULL) {
+		set_error(0x32, 0, 0);
+		return;
+	}
 
 	clear_error();
-	if ((resolved = resolve_path(dir, false)) == NULL) {
+	if ((resolved = resolve_path_iso(parsed, false, WILDCARD_DIR)) == NULL) {
+		free(parsed);
 		// error already set
 		return;
 	}
+
+	free(parsed);
 #ifdef __MINGW32__
-	if (_mkdir(resolved))
+	if (_mkdir((char *)resolved))
 #else
-	if (mkdir(resolved,0777))
+	if (mkdir((char *)resolved,0777))
 #endif
 	{
 		if (errno == EEXIST) {
@@ -1022,18 +1327,18 @@ cmkdir(char *dir)
 }
 
 static void
-crename(char *f)
+crename(uint8_t *f)
 {
 	// This function receives the whole R command, which could be
 	// "R:NEW=OLD" or "RENAME:NEW=OLD" or anything in between
 	// let's simply find the first colon and chop it there
-	char *tmp = malloc(strlen(f)+1);
+	uint8_t *tmp = malloc(u8strlen(f)+1);
 	if (tmp == NULL) {
 		set_error(0x70, 0, 0);
 		return;
 	}
-	strcpy(tmp,f);
-	char *d = strchr(tmp,':');
+	u8strcpy(tmp,f);
+	uint8_t *d = u8strchr(tmp,':');
 
 	if (d == NULL) {
 		// No colon, not a valid rename command
@@ -1045,7 +1350,7 @@ crename(char *f)
 	d++; // one character after the colon
 
 	// Now split on the = sign to find
-	char *s = strchr(d,'=');
+	uint8_t *s = u8strchr(d,'=');
 
 	if (s == NULL) {
 		// No equals sign, not a valid rename command
@@ -1056,18 +1361,18 @@ crename(char *f)
 
 	*(s++) = 0; // null-terminate d and advance s
 	
-	char *src;
-	char *dst;
+	uint8_t *src;
+	uint8_t *dst;
 
 	clear_error();
-	if ((src = resolve_path(s, true)) == NULL) {
+	if ((src = resolve_path_iso(s, true, WILDCARD_ALL)) == NULL) {
 		// source not found
 		free(tmp);
 		set_error(0x62, 0, 0);
 		return;
 	}
 
-	if ((dst = resolve_path(d, false)) == NULL) {
+	if ((dst = resolve_path_iso(d, false, WILDCARD_ALL)) == NULL) {
 		// dest not found
 		free(tmp);
 		free(src);
@@ -1077,7 +1382,7 @@ crename(char *f)
 
 	free(tmp); // we're now done with d and s (part of tmp)
 
-	if (rename(src, dst)) {
+	if (rename((char *)src, (char *)dst)) {
 		if (errno == EACCES) {
 			set_error(0x63, 0, 0);
 		} else if (errno == EINVAL) {
@@ -1095,19 +1400,30 @@ crename(char *f)
 
 
 static void
-crmdir(char *dir)
+crmdir(uint8_t *dir)
 {
 	// The directory name is in dir, coming from the command channel
 	// with the RD: portion stripped off
-	char *resolved;
+	uint8_t *resolved;
+	uint8_t *parsed;
+
+	parsed = parse_dos_filename(dir, true);
+
+	if (parsed == NULL) {
+		set_error(0x32, 0, 0);
+		return;
+	}
 
 	clear_error();
-	if ((resolved = resolve_path(dir, true)) == NULL) {
+	if ((resolved = resolve_path_iso(parsed, true, WILDCARD_DIR)) == NULL) {
+		free(parsed);
 		set_error(0x39, 0, 0);
 		return;
 	}
 
-	if (rmdir(resolved)) {
+	free(parsed);
+
+	if (rmdir((char *)resolved)) {
 		if (errno == ENOTEMPTY || errno == EACCES) {
 			set_error(0x63, 0, 0);
 		} else {
@@ -1122,19 +1438,19 @@ crmdir(char *dir)
 
 
 static void
-cunlink(char *f)
+cunlink(uint8_t *f)
 {
 	// This function receives the whole S command, which could be
 	// "S:FILENAME" or "SCRATCH:FILENAME" or anything in between
 	// let's simply find the first colon and chop it there
 	// TODO path syntax and multiple files
-	char *tmp = malloc(strlen(f)+1);
+	uint8_t *tmp = malloc(u8strlen(f)+1);
 	if (tmp == NULL) {
 		set_error(0x70, 0, 0);
 		return;
 	}
-	strcpy(tmp,f);
-	char *fn = strchr(tmp,':');
+	u8strcpy(tmp,f);
+	uint8_t *fn = u8strchr(tmp,':');
 
 	if (fn == NULL) {
 		// No colon, not a valid scratch command
@@ -1144,10 +1460,10 @@ cunlink(char *f)
 	}
 
 	fn++; // one character after the colon
-	char *resolved;
+	uint8_t *resolved;
 
 	clear_error();
-	if ((resolved = resolve_path(fn, true)) == NULL) {
+	if ((resolved = resolve_path_iso(fn, true, WILDCARD_PRG)) == NULL) {
 		free(tmp);
 		set_error(0x62, 0, 0);
 		return;
@@ -1155,7 +1471,7 @@ cunlink(char *f)
 
 	free(tmp); // we're now done with fn (part of tmp)
 
-	if (unlink(resolved)) {
+	if (unlink((char *)resolved)) {
 		if (errno == EACCES) {
 			set_error(0x63, 0, 0);
 		} else {
@@ -1179,18 +1495,18 @@ copen(int channel)
 		return -1;
 	}
 
-	char *resolved_filename = NULL;
-	char *parsed_filename = NULL;
+	uint8_t *resolved_filename = NULL;
+	uint8_t *parsed_filename = NULL;
 	int ret = -1;
 
 	// decode ",P,W"-like suffix to know whether we're writing
 	bool append = false;
 	channels[channel].read = true;
 	channels[channel].write = false;
-	char *first = strchr(channels[channel].name, ',');
+	uint8_t *first = u8strchr(channels[channel].name, ',');
 	if (first) {
 		*first = 0; // truncate name here
-		char *second = strchr(first+1, ',');
+		uint8_t *second = u8strchr(first+1, ',');
 		if (second) {
 			switch(second[1]) {
 				case 'A':
@@ -1220,7 +1536,7 @@ copen(int channel)
 
 	if (!channels[channel].write && channels[channel].name[0] == '$') {	
 		dirlist_pos = 0;
-		if (!strncmp(channels[channel].name,"$=C",3)) {
+		if (!u8strncmp(channels[channel].name,"$=C",3)) {
 			// This emulates the behavior in the ROM code in
 			// https://github.com/X16Community/x16-rom/pull/5
 			dirlist_len = create_cwd_listing(dirlist);
@@ -1228,15 +1544,16 @@ copen(int channel)
 			dirlist_len = create_directory_listing(dirlist, channels[channel].name);
 		}
 	} else {
-		if (!strcmp(channels[channel].name, ":*") && prg_file) {
+		if (!u8strcmp(channels[channel].name, ":*") && prg_file && !prg_consumed) {
 			channels[channel].f = prg_file; // special case
+			prg_consumed = true;
 		} else {
-			if ((parsed_filename = parse_dos_filename(channels[channel].name)) == NULL) {
+			if ((parsed_filename = parse_dos_filename(channels[channel].name, false)) == NULL) {
 				set_error(0x32, 0, 0); // Didn't parse out properly
 				return -2; 
 			}
 
-			resolved_filename = resolve_path(parsed_filename, false);
+			resolved_filename = resolve_path_iso(parsed_filename, false, WILDCARD_PRG);
 			free(parsed_filename);
 
 			if (resolved_filename == NULL) {
@@ -1251,11 +1568,11 @@ copen(int channel)
 			}
 		
 			if (append) {
-				channels[channel].f = SDL_RWFromFile(resolved_filename, "ab+");
+				channels[channel].f = SDL_RWFromFile((char *)resolved_filename, "ab+");
 			} else if (channels[channel].read && channels[channel].write) {
-				channels[channel].f = SDL_RWFromFile(resolved_filename, "rb+");
+				channels[channel].f = SDL_RWFromFile((char *)resolved_filename, "rb+");
 			} else {
-				channels[channel].f = SDL_RWFromFile(resolved_filename, channels[channel].write ? "wb" : "rb");
+				channels[channel].f = SDL_RWFromFile((char *)resolved_filename, channels[channel].write ? "wb" : "rb");
 			}
 
 			free(resolved_filename);
@@ -1311,18 +1628,18 @@ ieee_init()
 		if (fsroot_path == NULL) { // if null, default to cwd
 			// We hold this for the lifetime of the program, and we don't have
 			// any sort of destructor, so we rely on the OS teardown to free() it.
-			fsroot_path = getcwd(NULL, 0);
+			fsroot_path = u8getcwd(NULL, 0);
 		} else {
 			// Normalize it
-			fsroot_path = realpath(fsroot_path, NULL);
+			fsroot_path = u8realpath(fsroot_path, NULL);
 		}
 
 		if (startin_path == NULL) {
 			// same as above
-			startin_path = getcwd(NULL, 0);
+			startin_path = u8getcwd(NULL, 0);
 		} else {
 			// Normalize it
-			startin_path = realpath(startin_path, NULL);
+			startin_path = u8realpath(startin_path, NULL);
 		}
 		// Quick error checks
 		if (fsroot_path == NULL) {
@@ -1340,7 +1657,7 @@ ieee_init()
 
 		// If startin_path is not reachable, we instead default to setting it
 		// back to fsroot_path
-		if (strncmp(fsroot_path, startin_path, strlen(fsroot_path))) { // not equal
+		if (u8strncmp(fsroot_path, startin_path, u8strlen(fsroot_path))) { // not equal
 			free(startin_path);
 			startin_path = fsroot_path;
 		}
@@ -1364,12 +1681,12 @@ ieee_init()
 	}
 
 	// Now initialize our emulated cwd.
-	hostfscwd = malloc(strlen(startin_path)+1);
+	hostfscwd = malloc(u8strlen(startin_path)+1);
 	if (hostfscwd == NULL) {
 		fprintf(stderr, "Failed to allocate memory for hostfscwd\n");
 		exit(1);
 	}
-	strcpy(hostfscwd, startin_path);
+	u8strcpy(hostfscwd, startin_path);
 
 	// Locate and remember cbdos_flags variable address in KERNAL vars
 	{

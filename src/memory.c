@@ -15,11 +15,7 @@
 #include "via.h"
 #include "memory.h"
 #include "video.h"
-#ifdef _MSC_VER
-#include "extern/src/ym2151.h"
-#else
-#include "ym2151.h"
-#endif
+#include "ymglue.h"
 #include "cpu/fake6502.h"
 #include "wav_recorder.h"
 #include "audio.h"
@@ -40,7 +36,6 @@ bool *RAM_access_flags;
 
 #define DEVICE_EMULATOR (0x9fb0)
 
-uint8_t cpuio_read(uint8_t reg);
 void cpuio_write(uint8_t reg, uint8_t value);
 
 void
@@ -143,9 +138,7 @@ read6502(uint16_t address) {
 uint8_t
 real_read6502(uint16_t address, bool debugOn, uint8_t bank)
 {
-	if (address < 2) { // CPU I/O ports
-		return cpuio_read(address);
-	} else if (address < 0x9f00) { // RAM
+	if (address < 0x9f00) { // RAM
 		return RAM[address];
 	} else if (address < 0xa000) { // I/O
 		if (!debugOn && address >= 0x9fa0) {
@@ -163,13 +156,17 @@ real_read6502(uint16_t address, bool debugOn, uint8_t bank)
 			if (!debugOn) {
 				clockticks6502 += 3;
 			}
-			return 0;
+			if (address == 0x9f41) {
+				audio_render();
+				return YM_read_status();
+			}
+			return 0x9f; // open bus read
 		} else if (address >= 0x9fb0 && address < 0x9fc0) {
 			// emulator state
 			return emu_read(address & 0xf, debugOn);
 		} else {
 			// future expansion
-			return 0;
+			return 0x9f; // open bus read
 		}
 	} else if (address < 0xc000) { // banked RAM
 		int ramBank = debugOn ? bank : effective_ram_bank();
@@ -205,11 +202,12 @@ write6502(uint16_t address, uint8_t value)
 				RAM_access_flags[0xa000 + (effective_ram_bank() << 13) + address - 0xa000] = true;
 		}
 	}
-
-	// Write to memory
-	if (address < 2) { // CPU I/O ports
+	// Write to CPU I/O ports
+	if (address < 2) { 
 		cpuio_write(address, value);
-	} else if (address < 0x9f00) { // RAM
+	}
+	// Write to memory
+	if (address < 0x9f00) { // RAM
 		RAM[address] = value;
 	} else if (address < 0xa000) { // I/O
 		if (address >= 0x9fa0) {
@@ -248,6 +246,12 @@ write6502(uint16_t address, uint8_t value)
 		}
 		// ignore if base ROM (banks 0-31)
 	}
+}
+
+void
+vp6502()
+{
+	memory_set_rom_bank(0);
 }
 
 //
@@ -292,18 +296,6 @@ uint8_t
 memory_get_rom_bank()
 {
 	return rom_bank;
-}
-
-uint8_t
-cpuio_read(uint8_t reg)
-{
-	switch (reg) {
-		case 0:
-			return memory_get_ram_bank();
-		case 1:
-			return memory_get_rom_bank();
-	}
-	return 0; // to make the compiler happy
 }
 
 void

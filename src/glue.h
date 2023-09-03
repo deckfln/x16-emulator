@@ -27,9 +27,9 @@
 #define WINDOW_TITLE "Commander X16"
 
 #ifdef __APPLE__
-#define MOUSE_GRAB_MSG " (\xE2\x87\xA7\xE2\x8C\x98M to release mouse)"
+#define MOUSE_GRAB_MSG " (\xE2\x87\xA7\xE2\x8C\x98M to end mouse/keyboard capture)"
 #else
-#define MOUSE_GRAB_MSG " (Ctrl+M to release mouse)"
+#define MOUSE_GRAB_MSG " (Ctrl+M to end mouse/keyboard capture)"
 #endif
 
 typedef enum {
@@ -71,8 +71,8 @@ extern bool save_on_exit;
 extern bool disable_emu_cmd_keys;
 extern gif_recorder_state_t record_gif;
 extern char *gif_path;
-extern char *fsroot_path;
-extern char *startin_path;
+extern uint8_t *fsroot_path;
+extern uint8_t *startin_path;
 extern uint8_t keymap;
 extern bool warp_mode;
 extern bool testbench;
@@ -82,9 +82,11 @@ extern bool enable_midline;
 
 extern void machine_dump(const char* reason);
 extern void machine_reset();
+extern void machine_nmi();
 extern void machine_paste(char *text);
 extern void machine_toggle_warp();
 extern void init_audio();
+extern void main_shutdown();
 
 extern bool video_is_tilemap_address(int addr);
 extern bool video_is_tiledata_address(int addr);

@@ -13,6 +13,7 @@
 #include "../msvc/limits.h"
 #else
 #	include <SDL.h>
+#   include <unistd.h>
 #endif
 #include <zlib.h>
 #include <inttypes.h>

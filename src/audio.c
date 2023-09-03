@@ -7,11 +7,7 @@
 #include "vera_psg.h"
 #include "vera_pcm.h"
 #include "wav_recorder.h"
-#ifdef _MSC_VER
-#	include "extern/src/ym2151.h"
-#else
-#	include "ym2151.h"
-#endif
+#include "ymglue.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
