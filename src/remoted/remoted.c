@@ -27,6 +27,7 @@ static char *ok = "{\"status\" : \"ok\"}";
 
 static char json[8192];
 char        tmp[256] = {0};
+static uint16_t _start   = 0;	// target to restart the PRG
 
 /**
  *
@@ -821,10 +822,10 @@ remoted_cpu(struct MHD_Connection *connection, char **next_token)
  ********************************************************************/
 
 /**
- * Set CPU breakpoint
+ * move the PC back to the start
  */
 static struct MHD_Response *
-remoted_run(struct MHD_Connection *connection, char **next_token)
+remoted_restart(struct MHD_Connection *connection, char **next_token)
 {
 #ifdef _MSC_VER
 	char *token = strtok_s(NULL, "/", next_token);
@@ -835,7 +836,9 @@ remoted_run(struct MHD_Connection *connection, char **next_token)
 	if (token != NULL) {
 		uint16_t addr = (uint16_t)atoi(token);
 
-		pc = addr;
+		_start   = addr;
+		myStatus = CPU_RESTART;
+
 		return remoted_ok(connection);
 
 	}
@@ -900,8 +903,8 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 	else if (strcmp(token, "watch") == 0) {
 		response = remoted_watch(connection, &next_token);
 	}
-	else if (strcmp(token, "run") == 0) {
-		response = remoted_run(connection, &next_token);
+	else if (strcmp(token, "restart") == 0) {
+		response = remoted_restart(connection, &next_token);
 	}
 
 	if (response != NULL) {
@@ -940,7 +943,12 @@ remoted_close(void)
 enum REMOTED_CMD
 remoted_getStatus(void)
 {
-	if (myStatus == CPU_NEXT) {
+	if (myStatus == CPU_RESTART) {
+		pc       = _start;
+		sp       = 0xf6;
+		myStatus = CPU_RUN;
+	}
+	else if (myStatus == CPU_NEXT) {
 		// synchronous execution => send the response to the debugger;
 		myStatus = CPU_STOP;
 	}
