@@ -156,26 +156,38 @@
     <ClInclude Include="..\src\extern\ymfm\src\ymfm_pcm.h">
       <Filter>Fichiers d%27en-tête\extern</Filter>
     </ClInclude>
-    <ClInclude Include="libunistd\unistd\dirent.h">
-      <Filter>Fichiers d%27en-tête\msvc</Filter>
-    </ClInclude>
-    <ClInclude Include="libunistd\unistd\unistd.h">
-      <Filter>Fichiers d%27en-tête\msvc</Filter>
-    </ClInclude>
-    <ClInclude Include="libunistd\portable\bsd_string.h">
-      <Filter>Fichiers d%27en-tête\msvc</Filter>
-    </ClInclude>
-    <ClInclude Include="libunistd\portable\stub.h">
-      <Filter>Fichiers d%27en-tête\msvc</Filter>
-    </ClInclude>
-    <ClInclude Include="libunistd\unistd\sigaction.h">
-      <Filter>Fichiers d%27en-tête\msvc</Filter>
-    </ClInclude>
-    <ClInclude Include="libunistd\unistd\sys\sys_types.h">
-      <Filter>Fichiers d%27en-tête\msvc</Filter>
-    </ClInclude>
     <ClInclude Include="..\src\extern\include\gif.h">
       <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\include\stb_image_write.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\iso_8859_15.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\remoted\remoted.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\portable\bsd_string.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\portable\stub.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\dirent.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\linux\limits.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\sigaction.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\sys\sys_types.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\unistd.h">
+      <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -265,6 +277,27 @@
     </ClCompile>
     <ClCompile Include="libunistd\unistd\unistd.cpp">
       <Filter>Fichiers sources\libunistd</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_adpcm.cpp">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_opl.cpp">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_opm.cpp">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_pcm.cpp">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\iso_8859_15.c">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ymglue.cpp">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\remoted\remoted.c">
+      <Filter>Fichiers sources\remoted</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

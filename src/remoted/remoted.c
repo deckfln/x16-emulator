@@ -29,9 +29,9 @@ static char json[8192];
 char        tmp[256] = {0};
 static uint16_t _start   = 0;	// target to restart the PRG
 
-#ifndef _MSVC_VER
-#define strtok_s(a, b, c) strtok(a,b)
-#define strcat_s(a, b, c) strcat(a,c)
+#ifndef _MSC_VER
+#	define strtok_s(a, b, c) strtok(a, b)
+#	define strcat_s(a, b, c) strcat(a,c)
 #endif
 
 /**
@@ -391,7 +391,7 @@ read_memory(uint16_t len, uint16_t address, uint8_t bank)
 			       (real_read6502(address + 2, true, bank) << 8) |
 			       real_read6502(address + 3, true, bank);
 		default:
-#ifdef _MSVC_VER
+#ifdef _MSC_VER
 			__debugbreak();
 #else
 			raise(SIGTRAP);
