@@ -28,6 +28,9 @@
     <Filter Include="Fichiers sources\libunistd">
       <UniqueIdentifier>{3e2b11f7-8106-47a9-a08f-215634bcfa3e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Fichiers d%27en-tête\msvc">
+      <UniqueIdentifier>{a7ba635e-5bd4-42ed-94dd-dbf16ca8fc76}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\audio.h">
@@ -132,8 +135,53 @@
     <ClInclude Include="..\src\cpu\tables.h">
       <Filter>Fichiers d%27en-tête\cpu</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\extern\src\ym2151.h">
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm.h">
       <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_adpcm.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_fm.ipp">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_opl.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_opm.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\ymfm\src\ymfm_pcm.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\dirent.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\unistd.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\portable\bsd_string.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\portable\stub.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\sigaction.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\sys\sys_types.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\include\gif.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\extern\include\stb_image_write.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\unistd\linux\limits.h">
+      <Filter>Fichiers d%27en-tête\msvc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\iso_8859_15.h">
+      <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -218,14 +266,29 @@
     <ClCompile Include="..\src\cpu\fake6502.c">
       <Filter>Fichiers sources\cpu</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\extern\src\ym2151.c">
-      <Filter>Fichiers sources\extern</Filter>
-    </ClCompile>
     <ClCompile Include="libunistd\unistd\dirent.cpp">
       <Filter>Fichiers sources\libunistd</Filter>
     </ClCompile>
     <ClCompile Include="libunistd\unistd\unistd.cpp">
       <Filter>Fichiers sources\libunistd</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_adpcm.cpp">
+      <Filter>Fichiers sources\extern</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_opl.cpp">
+      <Filter>Fichiers sources\extern</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_opm.cpp">
+      <Filter>Fichiers sources\extern</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\extern\ymfm\src\ymfm_pcm.cpp">
+      <Filter>Fichiers sources\extern</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ymglue.cpp">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\iso_8859_15.c">
+      <Filter>Fichiers sources</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -9,7 +9,8 @@
 #include "debugger.h"
 #include "keyboard.h"
 #ifdef _MSC_VER
-#	include "../msvc/include/gif.h"
+#	include "extern/include/gif.h"
+#	include "../msvc/libunistd/unistd/linux/limits.h"
 #else
 #	include "gif.h"
 #endif
@@ -32,7 +33,11 @@
 
 #ifndef __EMSCRIPTEN__
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+#ifdef _MSC_VER
+#		include "extern/include/stb_image_write.h"
+#	else
+#		include "stb_image_write.h"
+#	endif
 #endif
 
 #define VERA_VERSION_MAJOR  0x00
@@ -544,7 +549,14 @@ screenshot(void)
 {
 	char path[PATH_MAX];
 	const time_t now = time(NULL);
+
+#ifdef _MSC_VER
+	struct tm tm;
+	localtime_s(&tm, &now);
+	strftime(path, PATH_MAX, "x16emu-%Y-%m-%d-%H-%M-%S.png", &tm);
+#else
 	strftime(path, PATH_MAX, "x16emu-%Y-%m-%d-%H-%M-%S.png", localtime(&now));
+#endif
 
 	memset(png_buffer, 0, SCREEN_WIDTH * SCREEN_HEIGHT * 3);
 
