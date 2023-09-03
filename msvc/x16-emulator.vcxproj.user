@@ -11,7 +11,7 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>-rom ../../rom.bin -remote-debugger -debug -prg ../../x16-uncharted/bin/test.prg</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-rom ../../rom.bin -remote-debugger -prg ../../x16-uncharted/bin/test.prg</LocalDebuggerCommandArguments>
     <LocalDebuggerWorkingDirectory>.</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>

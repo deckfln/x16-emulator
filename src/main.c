@@ -483,10 +483,10 @@ usage()
 	printf("\tis meant mainly for benchmarking, and may not reflect accurate\n");
 	printf("\thardware behavior.\n");
 	printf("-midline-effects\n");
-	printf("-remote-debugger\n");
-	printf("\API based web server running on port :9009\n");
 	printf("\tApproximate mid-line raster effects when changing tile, sprite,\n");
 	printf("\tand palette data. Requires a fast host CPU.\n");
+	printf("-remote-debugger\n");
+	printf("\API based web server running on port :9009\n");
 	printf("-enable-ym2151-irq\n");
 	printf("\tConnect the YM2151 IRQ source to the emulated CPU. This option increases\n");
 	printf("\tCPU usage as audio render is triggered for every CPU instruction.\n");
@@ -955,6 +955,10 @@ main(int argc, char **argv)
 			argc--;
 			argv++;
 			enable_midline = true;
+		} else if (!strcmp(argv[0], "-remote-debugger")) {
+			argc--;
+			argv++;
+			remote_debugger = true;
 		} else {
 			usage();
 		}
