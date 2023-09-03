@@ -487,6 +487,11 @@ Release Notes
 -------------
 See [RELEASES](RELEASES.md#releases).
 
+Prerequesite
+------------
+libmicrohttpd-dev
+libcjson-dev
+libpng-dev
 
 <!-------------------------------------------------------------------->
 [releases]: https://github.com/X16Community/x16-emulator/releases

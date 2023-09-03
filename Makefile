@@ -12,7 +12,7 @@ endif
 
 CFLAGS=-std=c99 -O3 -Wall -Werror -g $(shell $(SDL2CONFIG) --cflags) -Isrc/extern/include
 CXXFLAGS=-std=c++17 -O3 -Wall -Werror -Isrc/extern/ymfm/src
-LDFLAGS=$(shell $(SDL2CONFIG) --libs) -lm -lz
+LDFLAGS=$(shell $(SDL2CONFIG) --libs) -lm -lz -lmicrohttpd -lcjson -lpng
 
 # build with link time optimization
 ifndef NOLTO
@@ -66,6 +66,7 @@ endif
 
 _X16_OBJS = cpu/fake6502.o memory.o disasm.o video.o i2c.o smc.o rtc.o via.o serial.o ieee.o vera_spi.o audio.o vera_pcm.o vera_psg.o sdcard.o main.o debugger.o javascript_interface.o joystick.o rendertext.o keyboard.o icon.o timing.o wav_recorder.o testbench.o files.o cartridge.o iso_8859_15.o ymglue.o
 _X16_OBJS += extern/ymfm/src/ymfm_opm.o
+_X16_OBJS += remoted/remoted.o
 X16_OBJS = $(patsubst %,$(X16_ODIR)/%,$(_X16_OBJS))
 X16_DEPS := $(X16_OBJS:.o=.d)
 

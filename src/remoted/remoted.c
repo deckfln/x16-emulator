@@ -1,6 +1,11 @@
 #include "remoted.h"
+#include "../../src/timing.h"
 
+#ifdef __MSVC_VER
 #include <winsock2.h>
+#else
+#include <signal.h>
+#endif
 #include <microhttpd.h>
 #include <png.h>
 #include <cjson/cJSON.h>
@@ -14,20 +19,20 @@
 //   private functions
 //-----------------------------------------------------------
 
-static enum REMOTE_CMD myStatus = CPU_RUN;
+static enum REMOTED_CMD myStatus = CPU_RUN;
 
 static struct MHD_Daemon *daemon = NULL;
-static fd_set rs;
-static fd_set ws;
-static fd_set es;
-static MHD_UNSIGNED_LONG_LONG mhd_timeout;
-static MHD_socket  max = 0;
 
 static char *ok = "{\"status\" : \"ok\"}";
 
 static char json[8192];
 char        tmp[256] = {0};
 static uint16_t _start   = 0;	// target to restart the PRG
+
+#ifndef _MSVC_VER
+#define strtok_s(a, b, c) strtok(a,b)
+#define strcat_s(a, b, c) strcat(a,c)
+#endif
 
 /**
  *
@@ -192,11 +197,7 @@ sprite_to_png(struct png_mem_encode *target, uint32_t *bitmap, uint8_t width, ui
 static struct MHD_Response *
 remoted_sprite(struct MHD_Connection* connection, char** next_token)
 {
-#ifdef _MSC_VER
 	char *token = strtok_s(NULL, "/", next_token);
-#else
-	char *token = strtok(NULL, "/");
-#endif
 
 	if (token != NULL) {
 		int32_t spriteID = atoi(token);
@@ -221,7 +222,6 @@ remoted_sprite(struct MHD_Connection* connection, char** next_token)
 
 			uint32_t bitmap = prop->sprite_address;
 			uint32_t *ptr = img_argb;
-			uint32_t size   = 0;
 			uint8_t  val;
 
 			for (uint8_t y = 0; y < height; y++) {
@@ -274,11 +274,7 @@ remoted_sprite(struct MHD_Connection* connection, char** next_token)
 static struct MHD_Response *
 remoted_vera(struct MHD_Connection *connection, char **next_token)
 {
-#ifdef _MSC_VER
 	char *token = strtok_s(NULL, "/", next_token);
-#else
-	char *token = strtok(NULL, "/");
-#endif
 
 	if (token != NULL && strcmp(token, "sprite") == 0) {
 		return remoted_sprite(connection, next_token);
@@ -308,11 +304,7 @@ getCurrentBank(int pc)
 static struct MHD_Response *
 remoted_dump(struct MHD_Connection *connection, char **next_token)
 {
-#ifdef _MSC_VER
 	char *token = strtok_s(NULL, "/", next_token);
-#else
-	char *token = strtok(NULL, "/");
-#endif
 
 	int len = 256;
 
@@ -386,7 +378,7 @@ initWatches(void)
  * read memory
  */
 static uint32_t
-read_memory(len, address, bank)
+read_memory(uint16_t len, uint16_t address, uint8_t bank)
 {
 	switch (len) {
 		case 1:
@@ -399,7 +391,11 @@ read_memory(len, address, bank)
 			       (real_read6502(address + 2, true, bank) << 8) |
 			       real_read6502(address + 3, true, bank);
 		default:
+#ifdef _MSVC_VER
 			__debugbreak();
+#else
+			raise(SIGTRAP);
+#endif
 	}
 
 	return 0;
@@ -450,7 +446,6 @@ remoted_watch_list(struct MHD_Connection* connection, char** next_token)
 	bool first = true;
 	for (int i = 0; i < MAX_WATCHES; i++) {
 		if (watches[i].status != OFF) {
-#ifdef _MSC_VER
 			if (!first) {
 				strcat_s(json, sizeof(json), ",");
 			}
@@ -460,23 +455,10 @@ remoted_watch_list(struct MHD_Connection* connection, char** next_token)
 				watches[i].bank, \
 				watches[i].len);
 			strcat_s(json, sizeof(json), tmp);
-#else
-			if (!first) {
-				strcat(json, ",");
-			}
-			sprintf(tmp, "{\"addr\":%04X,\"lzn\":%d}", watches[i].pc, watches[i].bank, watches[i].len);
-			if (strlen(tmp) + strlen(json) + 4 < sizeof(json)) {
-				strcat(json, tmp);
-			}
-#endif
 			first = false;
 		}
 	}
-#ifdef _MSC_VER
 	strcat_s(json, sizeof(json), "]");
-#else
-	strcat(json[0], "]");
-#endif
 
 	struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
@@ -494,11 +476,7 @@ remoted_watch(struct MHD_Connection *connection, char **next_token)
 {
 	static char *nok = "{\"status\" : \"error\", \"message\":\"no available breakpoint\"}";
 
-#ifdef _MSC_VER
 	char *token = strtok_s(NULL, "/", next_token);
-#else
-	char *token = strtok(NULL, "/");
-#endif
 
 	uint8_t status = OFF;
 	uint8_t length = 0;
@@ -615,7 +593,7 @@ static void
 initBreakpoints(void)
 {
 	for (int i = 0; i < MAX_BREAKPOINTS; i++) {
-		breakpoints[i].active = FALSE;
+		breakpoints[i].active = false;
 	}
 }
 
@@ -649,11 +627,7 @@ remoted_breakpoint(struct MHD_Connection *connection, char **next_token)
 {
 	static char *nok = "{\"status\" : \"error\", \"message\":\"no available breakpoint\"}";
 
-#ifdef _MSC_VER
 	char *token = strtok_s(NULL, "/", next_token);
-#else
-	char *token = strtok(NULL, "/");
-#endif
 
 	if (token != NULL) {
 		uint8_t bank = (uint8_t)atoi(token);
@@ -669,20 +643,19 @@ remoted_breakpoint(struct MHD_Connection *connection, char **next_token)
 
 			// find first available breakpoint
 			// and check if the breakpoint is already set
-			int index           = -1;
 			int first_available = -1;
 			for (int i = 0; i < MAX_BREAKPOINTS; i++) {
-				if (breakpoints[i].active == FALSE && first_available < 0) {
+				if (breakpoints[i].active == false && first_available < 0) {
 					first_available = i;
 				} else if (breakpoints[i].pc == address && breakpoints[i].bank == bank) {
-					breakpoints[i].active = FALSE;
+					breakpoints[i].active = false;
 					json                  = ok;
 					break;
 				}
 			}
 
 			if (json == nok && first_available >= 0) {
-				breakpoints[first_available].active = TRUE;
+				breakpoints[first_available].active = true;
 				breakpoints[first_available].pc     = address;
 				breakpoints[first_available].bank   = bank;
 				json                                = ok;
@@ -702,29 +675,15 @@ remoted_breakpoint(struct MHD_Connection *connection, char **next_token)
 		bool first = true;
 		for (int i = 0; i < MAX_BREAKPOINTS; i++) {
 			if (breakpoints[i].active) {
-#ifdef _MSC_VER
 				if (!first) {
 					strcat_s(json, sizeof(json), ",");
 				}
 				snprintf(tmp, sizeof(tmp) + 1, "{\"addr\":%d, \"bank\":%d}", breakpoints[i].pc, breakpoints[i].bank);
 				strcat_s(json, sizeof(json), tmp);
-#else
-				if (!first) {
-					strcat(json, ",");
-				}
-				sprintf(tmp, "{\"addr\":%04X}", breakpoints[i].pc, breakpoints[i].bank);
-				if (strlen(tmp) + strlen(json) + 4 < sizeof(json)) {
-					strcat(json, tmp);
-				}
-#endif
 				first = false;
 			}
 		}
-#ifdef _MSC_VER
 		strcat_s(json, sizeof(json), "]");
-#else
-		strcat(json[0], "]");
-#endif
 
 		struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
 		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
@@ -743,11 +702,7 @@ remoted_breakpoint(struct MHD_Connection *connection, char **next_token)
 static struct MHD_Response *
 remoted_debug(struct MHD_Connection *connection, char **next_token)
 {
-#ifdef _MSC_VER
 	char *token = strtok_s(NULL, "/", next_token);
-#else
-	char *token = strtok(NULL, "/");
-#endif
 
 	if (token != NULL) {
 		if (strcmp(token, "stepinto") == 0) {
@@ -827,11 +782,7 @@ remoted_cpu(struct MHD_Connection *connection, char **next_token)
 static struct MHD_Response *
 remoted_restart(struct MHD_Connection *connection, char **next_token)
 {
-#ifdef _MSC_VER
 	char *token = strtok_s(NULL, "/", next_token);
-#else
-	char *token = strtok(NULL, "/");
-#endif
 
 	if (token != NULL) {
 		uint16_t addr = (uint16_t)atoi(token);
@@ -859,7 +810,7 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 {
 	static int dummy;
 	struct MHD_Response *response=NULL;
-	int  ret = MHDR_DONE;
+	int  ret = MHD_YES;
 	char                *next_token = NULL;
 
 	if (0 != strcmp(method, "GET"))
@@ -875,11 +826,7 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 
 	*ptr = NULL; /* clear context pointer */
 
-#ifdef _MSC_VER
 	char *token = strtok_s((char *)url, "/", &next_token);
-#else
-	char *token = strtok((char *)url, "/");
-#endif
 
 	if (token == NULL) {
 		const char *page = "incorect command provided";

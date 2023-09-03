@@ -486,7 +486,7 @@ usage()
 	printf("\tApproximate mid-line raster effects when changing tile, sprite,\n");
 	printf("\tand palette data. Requires a fast host CPU.\n");
 	printf("-remote-debugger\n");
-	printf("\API based web server running on port :9009\n");
+	printf("\tAPI based web server running on port :9009\n");
 	printf("-enable-ym2151-irq\n");
 	printf("\tConnect the YM2151 IRQ source to the emulated CPU. This option increases\n");
 	printf("\tCPU usage as audio render is triggered for every CPU instruction.\n");
@@ -1292,13 +1292,13 @@ emulator_loop(void *param)
 		}
 
 		if (debugger_enabled) {
-			int dbgCmd = DEBUGGetCurrentStatus();
+			enum REMOTED_CMD dbgCmd = DEBUGGetCurrentStatus();
 			if (dbgCmd > 0) continue;
 			if (dbgCmd < 0) break;
 		}
 
 		if (remote_debugger) {
-			enum REMOTE_CMD cmd = remoted_getStatus();
+			enum REMOTED_CMD cmd = remoted_getStatus();
 			if (cmd == CPU_STOP || cmd == CPU_EXECUTE_NEXT) {
 				// system is on hold waiting for the remote debugger
 				continue;
