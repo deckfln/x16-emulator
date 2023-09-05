@@ -165,9 +165,6 @@
     <ClInclude Include="..\src\iso_8859_15.h">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\remoted\remoted.h">
-      <Filter>Fichiers d%27en-tête</Filter>
-    </ClInclude>
     <ClInclude Include="libunistd\portable\bsd_string.h">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
@@ -188,6 +185,12 @@
     </ClInclude>
     <ClInclude Include="libunistd\unistd\unistd.h">
       <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\remoted\remoted.h">
+      <Filter>Fichiers d%27en-tête\remoted</Filter>
+    </ClInclude>
+    <ClInclude Include="libunistd\portable\Finder.h">
+      <Filter>Fichiers d%27en-tête\extern</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -299,5 +302,10 @@
     <ClCompile Include="..\src\remoted\remoted.c">
       <Filter>Fichiers sources\remoted</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\README.md">
+      <Filter>Fichiers de ressources</Filter>
+    </None>
   </ItemGroup>
 </Project>

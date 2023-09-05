@@ -264,6 +264,16 @@ getegid()
 char *
 realpath(const char *path, char *resolved_path)
 {
+#ifdef _MSC_VER
+	if (!resolved_path) {
+		resolved_path = (char *)malloc(PATH_MAX);
+	}
+	const DWORD err = GetFullPathNameA(path, (DWORD)PATH_MAX, resolved_path, 0);
+	if (err == 0) {
+		return 0;
+	}
+	return resolved_path;
+#else
 	if (!resolved_path) {
 		return 0;
 	}
@@ -272,6 +282,7 @@ realpath(const char *path, char *resolved_path)
 		return 0;
 	}
 	return resolved_path;
+#endif
 }
 
 ssize_t

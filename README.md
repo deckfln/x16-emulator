@@ -34,6 +34,16 @@ Features
 	* mouse
 	* gamepads
 
+Prerequesite
+------------
+libmicrohttpd-dev
+libcjson-dev
+libpng-dev
+
+TODO
+----
+for visual studio, handle utf8 encode folder and file names (in the emulated dirent.c) FindFirstFileA => FindFirstFile
+
 Binaries & Compiling
 --------------------
 
@@ -486,12 +496,6 @@ All rights reserved. License: 2-clause BSD
 Release Notes
 -------------
 See [RELEASES](RELEASES.md#releases).
-
-Prerequesite
-------------
-libmicrohttpd-dev
-libcjson-dev
-libpng-dev
 
 <!-------------------------------------------------------------------->
 [releases]: https://github.com/X16Community/x16-emulator/releases
