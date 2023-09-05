@@ -22,7 +22,7 @@ namespace portable
 	    : public DIR
 	{
 	public:
-		WIN32_FIND_DATA data;
+		WIN32_FIND_DATAA data;
 		HANDLE          h;
 		DWORD           error;
 		char            path[MAX_PATH];
@@ -51,7 +51,7 @@ namespace portable
 		bool
 		Open()
 		{
-			h = FindFirstFile((LPCWSTR)path, &data);
+			h = FindFirstFileA((LPCSTR)path, &data);
 			if (INVALID_HANDLE_VALUE == h) {
 				return false;
 			}
@@ -105,7 +105,7 @@ namespace portable
 				tell = 1;
 				return true;
 			}
-			if (!FindNextFile(h, &data)) {
+			if (!FindNextFileA(h, &data)) {
 				error = GetLastError();
 				return false;
 			}

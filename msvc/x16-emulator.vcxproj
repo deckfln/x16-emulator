@@ -179,6 +179,7 @@
     <ClInclude Include="..\src\video.h" />
     <ClInclude Include="..\src\wav_recorder.h" />
     <ClInclude Include="libunistd\portable\bsd_string.h" />
+    <ClInclude Include="libunistd\portable\Finder.h" />
     <ClInclude Include="libunistd\portable\stub.h" />
     <ClInclude Include="libunistd\unistd\dirent.h" />
     <ClInclude Include="libunistd\unistd\linux\limits.h" />
