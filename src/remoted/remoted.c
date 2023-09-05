@@ -794,8 +794,28 @@ remoted_restart(struct MHD_Connection *connection, char **next_token)
 
 	}
 
-	const char *page = "incorect /RUN/";
+	const char *page = "incorect /restart/";
 	return remoted_error(connection, page);
+}
+
+/********************************************************************
+ *		run the current prog 
+ ********************************************************************/
+
+static struct MHD_Response *
+remoted_run(struct MHD_Connection *connection, char **next_token)
+{
+	char *token = strtok_s(NULL, "/", next_token);
+
+	char *run = malloc(5);
+	run[0] = 'R';
+	run[1] = 'U';
+	run[2] = 'N';
+	run[3]    = '\n';
+	run[4]    = 0;
+
+	machine_paste(run); // machine paste will free the block at the end
+	return remoted_ok(connection);
 }
 
 /********************************************************************
@@ -852,6 +872,9 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 	}
 	else if (strcmp(token, "restart") == 0) {
 		response = remoted_restart(connection, &next_token);
+	}
+	else if (strcmp(token, "run") == 0) {
+		response = remoted_run(connection, &next_token);
 	}
 
 	if (response != NULL) {
