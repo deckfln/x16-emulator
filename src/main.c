@@ -1043,7 +1043,7 @@ main(int argc, char **argv)
 	}
 
 	if (remote_debugger) {
-		if (!remoted_open()) {
+		if (!remoted_open(prg_path)) {
 			printf("Cannot connect to port :9009!\n");
 			exit(1);
 		}

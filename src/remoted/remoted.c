@@ -1,14 +1,17 @@
-#include "remoted.h"
 #include "../../src/timing.h"
 
-#ifdef __MSVC_VER
-#include <winsock2.h>
+#ifdef _MSC_VER
+#	include <winsock2.h>
+#	include <SDL2/SDL.h>
 #else
-#include <signal.h>
+#	include <signal.h>
+#	include <SDL.h>
 #endif
 #include <microhttpd.h>
 #include <png.h>
 #include <cjson/cJSON.h>
+
+#include "remoted.h"
 
 #include "../video.h"
 #include "../memory.h"
@@ -19,6 +22,7 @@
 //   private functions
 //-----------------------------------------------------------
 
+static char *RD_prg_path = NULL;	// full path of the currently debugged PRG
 static enum REMOTED_CMD myStatus = CPU_RUN;
 
 static struct MHD_Daemon *daemon = NULL;
@@ -773,7 +777,20 @@ remoted_cpu(struct MHD_Connection *connection, char **next_token)
 }
 
 /********************************************************************
- *		move PC pointer to XXXX (means "run")
+ *		run the current prog 
+ ********************************************************************/
+
+static struct MHD_Response *
+remoted_run(struct MHD_Connection *connection, char **next_token)
+{
+	char *run = _strdup("RUN\r");
+
+	machine_paste(run); // machine paste will free the block at the end
+	return remoted_ok(connection);
+}
+
+/********************************************************************
+ *		reset the emulator and relaunch the program
  ********************************************************************/
 
 /**
@@ -782,39 +799,18 @@ remoted_cpu(struct MHD_Connection *connection, char **next_token)
 static struct MHD_Response *
 remoted_restart(struct MHD_Connection *connection, char **next_token)
 {
-	char *token = strtok_s(NULL, "/", next_token);
+	machine_reset();
 
-	if (token != NULL) {
-		uint16_t addr = (uint16_t)atoi(token);
-
-		_start   = addr;
-		myStatus = CPU_RESTART;
-
-		return remoted_ok(connection);
-
+	//now reload the PRG from RD_prg_path
+	prg_file = SDL_RWFromFile(RD_prg_path, "rb");
+	if (!prg_file) {
+		printf("Cannot open %s!\n", RD_prg_path);
+		exit(1);
 	}
 
-	const char *page = "incorect /restart/";
-	return remoted_error(connection, page);
-}
-
-/********************************************************************
- *		run the current prog 
- ********************************************************************/
-
-static struct MHD_Response *
-remoted_run(struct MHD_Connection *connection, char **next_token)
-{
-	char *token = strtok_s(NULL, "/", next_token);
-
-	char *run = malloc(5);
-	run[0] = 'R';
-	run[1] = 'U';
-	run[2] = 'N';
-	run[3]    = '\n';
-	run[4]    = 0;
-
-	machine_paste(run); // machine paste will free the block at the end
+	char *restart = _strdup("LOAD\":*\",8,1\rRUN\r");
+	prg_consumed = false;		// force ieee.c:copen to use prg_file as file description
+	machine_paste(restart);		// machine paste will free restart at the end
 	return remoted_ok(connection);
 }
 
@@ -892,8 +888,11 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
  *
  */
 bool
-remoted_open(void)
+remoted_open(char *prg_path)
 {
+	if (prg_path != NULL) {
+		RD_prg_path = _strdup(prg_path);
+	}
 	initBreakpoints();
 	initWatches();
 
