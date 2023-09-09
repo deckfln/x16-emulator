@@ -2,12 +2,11 @@
   <img src="./.gh/logo.png" />
 </p>
 
-[![Build Status](https://github.com/x16community/x16-emulator/actions/workflows/build.yml/badge.svg)](https://github.com/x16community/x16-emulator/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/x16community/x16-emulator)](https://github.com/x16community/x16-emulator/releases)
 [![License: BSD-Clause](https://img.shields.io/github/license/x16community/x16-emulator)](./LICENSE)
 [![Contributors](https://img.shields.io/github/contributors/x16community/x16-emulator.svg)](https://github.com/x16community/x16-emulator/graphs/contributors)
 
-This is the Remote Debugging edition of the emulator for the Commander X16 computer system. Dependencies are listed below to compile on windows and linux.
+This is the __Remote Debugging edition__ of the emulator for the Commander X16 computer system. Dependencies are listed below to compile on windows and linux.
 
 Features
 --------
@@ -51,9 +50,9 @@ For linux
 
 TODO
 ----
-* for visual studio, handle utf8 encode folder and file names (in the emulated dirent.c) FindFirstFileA => FindFirstFile
-* Add modules to debug VERA and yamaha
-* Let the remote debugger to change memory or register values
+- [ ] for visual studio, handle utf8 encode folder and file names (in the emulated dirent.c) FindFirstFileA => FindFirstFile
+- [ ] Add modules to debug VERA and yamaha
+- [ ] Let the remote debugger to change memory or register values
 
 Binaries & Compiling
 --------------------
@@ -492,19 +491,64 @@ Since the NVRAM bank is not initialized, it is not included in the file. This ma
 
 Remote Debugger HTTP commands
 -----------------------------
-* /cpu : return a json list of parameters : bank, pc, sp, a, x, y flags, debugger status, emulator pid. This url has to be pulled by the remote debugger
-* /dump/bank/address/len : return a blob of len bytes starting at address (in decimal) from bank (in decimal)
-* /breakpoint : return a json list of current breakpoints
-* /breakpoint/bank/address : set a breakpoint on instruction at address from bank (in decimal). Switch the emulator status to paused when the instruction is about to be run.
-* /debug/stepinto : when the emulator is paused, enter into a JSR call
-* /debug/stepover : when the emulator is paused, step over a JSR call
-* /debug/stepout : : when the emulator is paused, excute the current function until RTS
-* /debug/continue : switch the emulator to run
-* /watch : return a json list of memory being monitored for change
-* /watch/bank/address/len : request the emulator to detect at bank/address for len bytes. Switch the emulator status to paused when the memory changes.
-* /restart : reset the emulator, reload the request PRG and re-launche
-* /run : run the loaded PRG
-* /vera/sprite/id : return a PNG image of sprite number #id
+<table>
+<tr>
+<th>url</th>
+<th>Description</th>
+</tr>
+<tr>
+<td><b>/cpu</b></td>
+<td>return a json list of parameters : bank, pc, sp, a, x, y flags, debugger status, emulator pid. This url has to be pulled by the remote debugger</td>
+</tr>
+<tr>
+<td><b>/dump/<i>-bank-</i>/<i>-address-</i>/<i>len</i></b></td>
+<td>eturn a blob of len bytes starting at address (in decimal) from bank (in decimal)</td>
+</tr>
+<tr>
+<td><b>/breakpoint</b></td>
+<td>return a json list of current breakpoints</td>
+</tr>
+<tr>
+<td><b>/breakpoint/<i>-bank-</i>/<i>-address-</i></b></td>
+<td>set a breakpoint on instruction at address from bank (in decimal). Switch the emulator status to paused when the instruction is about to be run.</td>
+</tr>
+<tr>
+<td><b>/debug/stepinto</b></td>
+<tdwhen the emulator is paused, enter into a JSR call</td>
+</tr>
+<tr>
+<td><b>/debug/stepover</b></td>
+<td>when the emulator is paused, step over a JSR call</td>
+</tr>
+<tr>
+<td><b>/debug/stepout</b></td>
+<td>when the emulator is paused, excute the current function until RTS</td>
+</tr>
+<tr>
+<td><b>/debug/continue</b></td>
+<td>switch the emulator to run</td>
+</tr>
+<tr>
+<td><b>/watch</b></td>
+<td>return a json list of memory being monitored for change</td>
+</tr>
+<tr>
+<td><b>/watch/<i>-bank-</i>/<i>-address-</i>/<i>-len-</i></b></td>
+<td>request the emulator to detect at bank/address for len bytes. Switch the emulator status to paused when the memory changes.</td>
+</tr>
+<tr>
+<td><b>/restart</b></td>
+<td>reset the emulator, reload the request PRG and re-launche</td>
+</tr>
+<tr>
+<td><b>/run</b></td>
+<td>run the loaded PRG</td>
+</tr>
+<tr>
+<td><b>/vera/sprite/<i>-id-</i></b></td>
+<td>return a PNG image of sprite number #id</tr>
+</tr>
+</table>
 
 Web Site
 --------
