@@ -10,6 +10,7 @@
 #include <microhttpd.h>
 #include <png.h>
 #include <cjson/cJSON.h>
+#include <process.h>
 
 #include "remoted.h"
 
@@ -22,6 +23,7 @@
 //   private functions
 //-----------------------------------------------------------
 
+static int RD_pid = -1;		// current process ID
 static char *RD_prg_path = NULL;	// full path of the currently debugged PRG
 static enum REMOTED_CMD myStatus = CPU_RUN;
 
@@ -303,7 +305,7 @@ getCurrentBank(int pc)
 }
 
 /**
- * Display MEMORY information
+ * Display MEMORY information /dump/bank/address/len
  */
 static struct MHD_Response *
 remoted_dump(struct MHD_Connection *connection, char **next_token)
@@ -625,6 +627,8 @@ hitBreakpoint(uint16_t pc, uint8_t bank)
 
 /**
  * Set CPU breakpoint
+ * /breakpoint
+ * /breakpoint/bank/address
  */
 static struct MHD_Response *
 remoted_breakpoint(struct MHD_Connection *connection, char **next_token)
@@ -701,6 +705,10 @@ remoted_breakpoint(struct MHD_Connection *connection, char **next_token)
 
 /********************************************************************
  *		step by step /debug/
+ * /debug/stepinto
+ * /debug/stepover
+ * /debug/stepout
+ * /debug/continue
  ********************************************************************/
 
 static struct MHD_Response *
@@ -772,6 +780,8 @@ remoted_cpu(struct MHD_Connection *connection, char **next_token)
 	cJSON_AddItemToObject(answer, "flags", jstatus);
 	cJSON *jmyStatus = cJSON_CreateNumber(myStatus);
 	cJSON_AddItemToObject(answer, "myStatus", jmyStatus);
+	cJSON *jmyPid= cJSON_CreateNumber(RD_pid);
+	cJSON_AddItemToObject(answer, "pid", jmyPid);
 
 	return remoted_json(connection, answer);
 }
@@ -890,9 +900,12 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 bool
 remoted_open(char *prg_path)
 {
+	RD_pid = _getpid();
+
 	if (prg_path != NULL) {
 		RD_prg_path = _strdup(prg_path);
 	}
+
 	initBreakpoints();
 	initWatches();
 

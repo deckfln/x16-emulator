@@ -7,7 +7,7 @@
 [![License: BSD-Clause](https://img.shields.io/github/license/x16community/x16-emulator)](./LICENSE)
 [![Contributors](https://img.shields.io/github/contributors/x16community/x16-emulator.svg)](https://github.com/x16community/x16-emulator/graphs/contributors)
 
-This is an emulator for the Commander X16 computer system. It only depends on SDL2 and should compile on all modern operating systems.
+This is the Remote Debugging edition of the emulator for the Commander X16 computer system. Dependencies are listed below to compile on windows and linux.
 
 Features
 --------
@@ -33,16 +33,27 @@ Features
 	* keyboard
 	* mouse
 	* gamepads
+* Remote Debugging using HTTP requests
 
-Prerequesite
-------------
-libmicrohttpd-dev
-libcjson-dev
-libpng-dev
+Prerequesite to compile the X16-emulator Remote Debugger edition
+----------------------------------------------------------------
+For Visual Studio (installed using vcpk)
+* sdl2
+* libmicrohttpd
+* cjson
+* libpng
+
+For linux
+* libsdl2-dev
+* libmicrohttpd-dev
+* libcjson-dev
+* libpng-dev
 
 TODO
 ----
-for visual studio, handle utf8 encode folder and file names (in the emulated dirent.c) FindFirstFileA => FindFirstFile
+* for visual studio, handle utf8 encode folder and file names (in the emulated dirent.c) FindFirstFileA => FindFirstFile
+* Add modules to debug VERA and yamaha
+* Let the remote debugger to change memory or register values
 
 Binaries & Compiling
 --------------------
@@ -83,11 +94,14 @@ Paths to those libraries can be changed to your installation directory if they a
 
 The output will be `x16emu.exe` in the current directory. Remember you will also need a `rom.bin` as described above and `SDL2.dll` in SDL2's binary folder.
 
+### Windows Visual Studio 2022 Build
+
+This edition comes with a solution file and patches to compile under visual studio 2022
 
 Starting
 --------
 
-You can start `x16emu`/`x16emu.exe` either by double-clicking it, or from the command line. The latter allows you to specify additional arguments.
+You can start `x16-emulator`/`x16-emulator.exe` either by double-clicking it, or from the command line. The latter allows you to specify additional arguments.
 
 * When starting `x16emu` without arguments, it will pick up the system ROM (`rom.bin`) from the executable's directory.
 * The system ROM filename/path can be overridden with the `-rom` command line argument.
@@ -135,8 +149,9 @@ You can start `x16emu`/`x16emu.exe` either by double-clicking it, or from the co
 * `-zeroram` fills RAM at startup with zeroes instead of the default of random data.
 * `-version` prints additional version information of the emulator and ROM.
 * When compiled with `#define TRACE`, `-trace` will enable an instruction trace on stdout.
+* `-remote-debugger` open an HTTP web server on *:9000 for requests from a remote debugger
 
-Run `x16emu -h` to see all command line options.
+Run `x16-emulator -h` to see all command line options.
 
 Keyboard Layout
 ---------------
@@ -474,6 +489,22 @@ This would create file with
 
 Since the NVRAM bank is not initialized, it is not included in the file. This makes the file a total of 66,048 bytes long. (512 bytes, plus four 16KB banks.)
 
+
+Remote Debugger HTTP commands
+-----------------------------
+* /cpu : return a json list of parameters : bank, pc, sp, a, x, y flags, debugger status, emulator pid. This url has to be pulled by the remote debugger
+* /dump/bank/address/len : return a blob of len bytes starting at address (in decimal) from bank (in decimal)
+* /breakpoint : return a json list of current breakpoints
+* /breakpoint/bank/address : set a breakpoint on instruction at address from bank (in decimal). Switch the emulator status to paused when the instruction is about to be run.
+* /debug/stepinto : when the emulator is paused, enter into a JSR call
+* /debug/stepover : when the emulator is paused, step over a JSR call
+* /debug/stepout : : when the emulator is paused, excute the current function until RTS
+* /debug/continue : switch the emulator to run
+* /watch : return a json list of memory being monitored for change
+* /watch/bank/address/len : request the emulator to detect at bank/address for len bytes. Switch the emulator status to paused when the memory changes.
+* /restart : reset the emulator, reload the request PRG and re-launche
+* /run : run the loaded PRG
+* /vera/sprite/id : return a PNG image of sprite number #id
 
 Web Site
 --------
