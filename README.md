@@ -2,7 +2,7 @@
   <img src="./.gh/logo.png" />
 </p>
 
-[![Release](https://img.shields.io/github/v/release/x16community/x16-emulator)](https://github.com/x16community/x16-emulator/releases)
+![Release](https://img.shields.io/github/v/release/x16community/x16-emulator)-rd
 [![License: BSD-Clause](https://img.shields.io/github/license/x16community/x16-emulator)](./LICENSE)
 [![Contributors](https://img.shields.io/github/contributors/x16community/x16-emulator.svg)](https://github.com/x16community/x16-emulator/graphs/contributors)
 
@@ -501,7 +501,7 @@ Remote Debugger HTTP commands
 <td>return a json list of parameters : bank, pc, sp, a, x, y flags, debugger status, emulator pid. This url has to be pulled by the remote debugger</td>
 </tr>
 <tr>
-<td><b>/dump/<i>-bank-</i>/<i>-address-</i>/<i>len</i></b></td>
+<td><b>/dump/_bank_/_address_/_len_</b></td>
 <td>eturn a blob of len bytes starting at address (in decimal) from bank (in decimal)</td>
 </tr>
 <tr>
@@ -509,7 +509,7 @@ Remote Debugger HTTP commands
 <td>return a json list of current breakpoints</td>
 </tr>
 <tr>
-<td><b>/breakpoint/<i>-bank-</i>/<i>-address-</i></b></td>
+<td><b>/breakpoint/_bank_/_address_</b></td>
 <td>set a breakpoint on instruction at address from bank (in decimal). Switch the emulator status to paused when the instruction is about to be run.</td>
 </tr>
 <tr>
@@ -533,7 +533,7 @@ Remote Debugger HTTP commands
 <td>return a json list of memory being monitored for change</td>
 </tr>
 <tr>
-<td><b>/watch/<i>-bank-</i>/<i>-address-</i>/<i>-len-</i></b></td>
+<td><b>/watch/_bank_/_address_/_len_</b></td>
 <td>request the emulator to detect at bank/address for len bytes. Switch the emulator status to paused when the memory changes.</td>
 </tr>
 <tr>
@@ -545,7 +545,7 @@ Remote Debugger HTTP commands
 <td>run the loaded PRG</td>
 </tr>
 <tr>
-<td><b>/vera/sprite/<i>-id-</i></b></td>
+<td><b>/vera/sprite/_id_</b></td>
 <td>return a PNG image of sprite number #id</tr>
 </tr>
 </table>
