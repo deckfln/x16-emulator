@@ -3,14 +3,27 @@
 #ifdef _MSC_VER
 #	include <winsock2.h>
 #	include <SDL2/SDL.h>
+#	include <process.h>
 #else
 #	include <signal.h>
 #	include <SDL.h>
+#	include <sys/types.h>
+#	include <unistd.h>
+#	include <stdio.h>
+#	include <string.h>
+#	define _getpid(a) getpid(a)
+char *_strdup(const char *s) {
+    size_t size = strlen(s) + 1;
+    char *p = malloc(size);
+    if (p) {
+        memcpy(p, s, size);
+    }
+    return p;
+}
 #endif
 #include <microhttpd.h>
 #include <png.h>
 #include <cjson/cJSON.h>
-#include <process.h>
 
 #include "remoted.h"
 
@@ -455,7 +468,7 @@ remoted_watch_list(struct MHD_Connection* connection, char** next_token)
 			if (!first) {
 				strcat_s(json, sizeof(json), ",");
 			}
-			snprintf(tmp, sizeof(tmp) + 1, \
+			snprintf(tmp, sizeof(tmp), \
 				"{\"addr\":%d, \"bank\":%d, \"len\":%d}", \
 				watches[i].addr, \
 				watches[i].bank, \
@@ -686,7 +699,7 @@ remoted_breakpoint(struct MHD_Connection *connection, char **next_token)
 				if (!first) {
 					strcat_s(json, sizeof(json), ",");
 				}
-				snprintf(tmp, sizeof(tmp) + 1, "{\"addr\":%d, \"bank\":%d}", breakpoints[i].pc, breakpoints[i].bank);
+				snprintf(tmp, sizeof(tmp), "{\"addr\":%d, \"bank\":%d}", breakpoints[i].pc, breakpoints[i].bank);
 				strcat_s(json, sizeof(json), tmp);
 				first = false;
 			}
