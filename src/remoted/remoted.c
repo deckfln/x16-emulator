@@ -938,6 +938,12 @@ remoted_close(void)
 enum REMOTED_CMD
 remoted_getStatus(void)
 {
+	// detect BRK
+	if (read6502(pc) == 00) {
+		myStatus = CPU_STOP;
+	}
+
+	// decide how to execute the current instruction
 	if (myStatus == CPU_RESTART) {
 		pc       = _start;
 		sp       = 0xf6;
