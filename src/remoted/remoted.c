@@ -45,7 +45,8 @@ static struct MHD_Daemon *daemon = NULL;
 static char *ok = "{\"status\" : \"ok\"}";
 
 static char json[8192];
-char        tmp[256] = {0};
+static uint8_t dump[512];
+static char tmp[256] = {0};
 static uint16_t _start   = 0;	// target to restart the PRG
 
 #ifndef _MSC_VER
@@ -97,6 +98,267 @@ remoted_json(struct MHD_Connection *connection, cJSON *answer)
 
 	return response;
 }
+
+/********************************************************************
+ *		manage memory & vram Watch breakpoints
+ ********************************************************************/
+
+#define MAX_WATCHES 128
+
+enum WATCH_STATUS {
+	OFF,
+	VALUE_CHANGED,
+	EXACT_VALUE,
+	VRAM = 128
+};
+
+struct myWatch {
+	uint8_t  status;
+	uint8_t  len; // 8 bits, 16 bits, 24 bits, 32 bits
+	uint16_t addr;
+	uint16_t bank;
+	uint32_t prev_value; // value at previous instruction
+	uint32_t watchFor;   // value to monitor
+};
+
+static struct myWatch watches[MAX_WATCHES];
+
+/**
+ * read memory
+ */
+static uint32_t
+read_memory(uint16_t len, uint16_t address, uint8_t bank)
+{
+	switch (len) {
+		case 1:
+			return real_read6502(address, true, bank);
+		case 2:
+			return (real_read6502(address, true, bank) << 8) | real_read6502(address + 1, true, bank);
+		case 4:
+			return (real_read6502(address, true, bank) << 24) |
+			       (real_read6502(address + 1, true, bank) << 16) |
+			       (real_read6502(address + 2, true, bank) << 8) |
+			       real_read6502(address + 3, true, bank);
+		default:
+#ifdef _MSC_VER
+			__debugbreak();
+#else
+			raise(SIGTRAP);
+#endif
+	}
+
+	return 0;
+}
+
+ /**
+ * Set memory WATCH breakpoint
+ * /watch/bank/memory/len/value
+ */
+static struct MHD_Response *
+remoted_watch_toggle(uint8_t type, char *token, struct MHD_Connection *connection, char **next_token)
+{
+	static char *nok = "{\"status\" : \"error\", \"message\":\"no available breakpoint\"}";
+
+	// change a watch
+	uint8_t status = OFF;
+	uint8_t length = 0;
+	uint8_t value  = 0;
+
+	uint8_t bank = (uint8_t)atoi(token);
+	char   *addr = strtok_s(NULL, "/", next_token);
+	if (token != NULL) {
+		uint16_t address = 0;
+		if (addr[0] == '0' && addr[2] == 'x') {
+			address = (uint16_t)strtol(addr + 2, NULL, 16);
+		} else {
+			address = (uint16_t)atoi(addr);
+		}
+
+		char *slength = strtok_s(NULL, "/", next_token);
+		if (slength != NULL) {
+			length = atoi(slength);
+
+			status       = VALUE_CHANGED;
+			char *svalue = strtok_s(NULL, "/", next_token);
+			if (svalue != NULL) {
+				value  = atoi(svalue);
+				status = EXACT_VALUE;
+			}
+		}
+
+		char *json = nok;
+
+		// find first available watch
+		// and check if the watch is already set
+		int index           = -1;
+		int first_available = -1;
+		for (int i = 0; i < MAX_WATCHES; i++) {
+			if (watches[i].status == OFF && first_available < 0) {
+				first_available = i;
+			} else if (watches[i].addr == address && watches[i].bank == bank) {
+				index = i;
+				break;
+			}
+		}
+
+		if (index >= 0) {
+			// the watch already exists
+			switch (status) {
+				case EXACT_VALUE:
+					watches[index].watchFor = value;
+					watches[index].len      = length;
+					break;
+				case VALUE_CHANGED:
+					watches[index].len        = length;
+					if (type == VRAM) {
+						uint32_t vram_addr = (bank << 16) | address;
+						watches[index].prev_value = video_space_read(vram_addr);
+					}
+					else {
+						watches[index].prev_value = read_memory(length, address, bank);
+					}
+					break;
+				default:
+					// remove the watch
+					watches[index].status = OFF;
+			}
+			json = ok;
+		} else if (first_available >= 0) {
+			// create a new watch
+			watches[first_available].addr       = address;
+			watches[first_available].bank       = bank;
+			watches[first_available].len        = length;
+
+			if (type == VRAM) {
+				uint32_t vram_addr        = (bank << 16) | address;
+				watches[first_available].prev_value = video_space_read(vram_addr);
+			} else {
+				watches[first_available].prev_value = read_memory(length, address, bank);
+			}
+
+			if (status == EXACT_VALUE) {
+				watches[first_available].status   = EXACT_VALUE | type;
+				watches[first_available].watchFor = value;
+			} else {
+				watches[first_available].status = VALUE_CHANGED | type;
+			}
+			json = ok;
+		} else {
+			json = nok; // no available slot
+		}
+
+		struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
+		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+		MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+		MHD_queue_response(connection, MHD_HTTP_OK, response);
+		return response;
+	}
+
+	const char *page = "missing bank for watch";
+	return remoted_error(connection, page);
+}
+
+/**
+ * init breakpoints
+ */
+static void
+initWatches(void)
+{
+	for (int i = 0; i < MAX_WATCHES; i++) {
+		watches[i].status = OFF;
+	}
+}
+
+/**
+ * did we hit a breakpoint ?
+ */
+static bool
+hitWatch(void)
+{
+	// check dev defined breakpoints
+	for (int i = 0; i < MAX_WATCHES; i++) {
+		if (watches[i].status == OFF) {
+			continue;
+		}
+
+		uint16_t a = watches[i].addr;
+		uint8_t  b = watches[i].bank;
+		uint32_t v = 0;
+
+		if ((watches[i].status & 0x80) == VRAM) {
+			uint32_t vram_addr = (b << 16) | a;
+			v                  = video_space_read(vram_addr);
+		} else {
+			v = read_memory(watches[i].len, a, b);
+		}
+
+		switch (watches[i].status & 0x7f) {
+			case EXACT_VALUE:
+				return v == watches[i].watchFor;
+			case VALUE_CHANGED: {
+				bool t = v != watches[i].prev_value;
+				if (t) {
+					watches[i].prev_value = v;
+				}
+				return t;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * provide list of watches
+ */
+static struct MHD_Response *
+remoted_watch_list(struct MHD_Connection *connection, char **next_token)
+{
+	// provide a list of watches
+	json[0] = '[';
+	json[1] = 0;
+
+	// return a list of breakpoints
+	bool first = true;
+	for (int i = 0; i < MAX_WATCHES; i++) {
+		if ((watches[i].status & 0x7f) != OFF) {
+			if (!first) {
+				strcat_s(json, sizeof(json), ",");
+			}
+			snprintf(tmp, sizeof(tmp), "{\"status\":%d,\"addr\":%d, \"bank\":%d, \"len\":%d}", watches[i].status, watches[i].addr, watches[i].bank, watches[i].len);
+			strcat_s(json, sizeof(json), tmp);
+			first = false;
+		}
+	}
+	strcat_s(json, sizeof(json), "]");
+
+	struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
+	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
+	MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+	MHD_queue_response(connection, MHD_HTTP_OK, response);
+	return response;
+}
+
+/**
+ * Set memory WATCH breakpoint
+ * /watch/bank/memory/len/value
+ */
+static struct MHD_Response *
+remoted_watch(struct MHD_Connection *connection, char **next_token)
+{
+	char *token = strtok_s(NULL, "/", next_token);
+
+	if (token != NULL) {
+		return remoted_watch_toggle(0, token, connection, next_token);
+	} else {
+		return remoted_watch_list(connection, next_token);
+	}
+	const char *page = "incorect breakpoint command provided";
+	return remoted_error(connection, page);
+}
+
+/********************************************************************
+ *		manage memory Watch breakpoints
+ ********************************************************************/
 
 /**
  *
@@ -288,6 +550,68 @@ remoted_sprite(struct MHD_Connection* connection, char** next_token)
 }
 
 /**
+ * Dump VERA memory
+ */
+/**
+ * Display VERA information
+ */
+static struct MHD_Response *
+remoted_vera_dump(struct MHD_Connection *connection, char **next_token)
+{
+	char *token = strtok_s(NULL, "/", next_token);
+
+	if (token != NULL) {
+		uint32_t start = (uint32_t)atoi(token);
+		uint8_t *p     = dump;
+
+		for (int i = 0; i < 256; i++) {
+			uint32_t addr = (start + i) & 0x1FFFF;
+			uint8_t  byte = video_space_read(addr);
+			uint8_t  type = 0;
+
+			if (video_is_tilemap_address(addr)) {
+				type = 1; // vram_tilemap;
+			} else if (video_is_tiledata_address(addr)) {
+				type = 2; // vram_tiledata;
+			} else if (video_is_special_address(addr)) {
+				type = 3; // vram_special;
+			} else {
+				type = 4; // vram_other;
+			}
+
+			*(p++) = type;
+			*(p++) = byte;
+		}
+
+		struct MHD_Response *response = MHD_create_response_from_buffer(sizeof(dump), dump, MHD_RESPMEM_PERSISTENT);
+		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/octet-stream");
+		MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+		MHD_queue_response(connection, MHD_HTTP_OK, response);
+		return response;
+	}
+
+	const char *page = "missing vera dump address ";
+	return remoted_error(connection, page);
+}
+
+/**
+ *
+ */
+static struct MHD_Response *
+remoted_vera_watch(struct MHD_Connection *connection, char **next_token)
+{
+	char *token = strtok_s(NULL, "/", next_token);
+
+	if (token != NULL) { 
+		return remoted_watch_toggle(VRAM, token, connection, next_token);
+	} else {
+		return remoted_watch_list(connection, next_token);
+	}
+	const char *page = "incorect breakpoint command provided";
+	return remoted_error(connection, page);
+}
+
+/**
  * Display VERA information
  */
 static struct MHD_Response *
@@ -297,6 +621,9 @@ remoted_vera(struct MHD_Connection *connection, char **next_token)
 
 	if (token != NULL && strcmp(token, "sprite") == 0) {
 		return remoted_sprite(connection, next_token);
+	}
+	else if (token != NULL && strcmp(token, "dump") == 0) {
+		return remoted_vera_dump(connection, next_token);
 	}
 
 	const char *page = "incorect vera command provided";
@@ -342,7 +669,6 @@ remoted_dump(struct MHD_Connection *connection, char **next_token)
 				len = atoi(slength);
 			}
 
-			static uint8_t dump[256];
 			for (int i = 0; i < len; i++) {
 				dump[i] = real_read6502(address++, true, bank);
 			}
@@ -355,239 +681,6 @@ remoted_dump(struct MHD_Connection *connection, char **next_token)
 	}
 
 	const char *page = "incorect dump command provided";
-	return remoted_error(connection, page);
-}
-
-/********************************************************************
- *		manage memory Watch breakpoints
- ********************************************************************/
-
-#define MAX_WATCHES 128
-
-enum WATCH_STATUS {
-	OFF,
-	VALUE_CHANGED,
-	EXACT_VALUE
-};
-
-
-struct myWatch {
-	uint8_t  status;
-	uint8_t  len; // 8 bits, 16 bits, 24 bits, 32 bits
-	uint16_t addr;
-	uint16_t bank;
-	uint32_t prev_value;	// value at previous instruction
-	uint32_t watchFor;		// value to monitor
-};
-
-static struct myWatch watches[MAX_WATCHES];
-
-/**
- * init breakpoints
- */
-static void
-initWatches(void)
-{
-	for (int i = 0; i < MAX_WATCHES; i++) {
-		watches[i].status = OFF;
-	}
-}
-
-/**
- * read memory
- */
-static uint32_t
-read_memory(uint16_t len, uint16_t address, uint8_t bank)
-{
-	switch (len) {
-		case 1:
-			return real_read6502(address, true, bank);
-		case 2:
-			return (real_read6502(address, true, bank) << 8) | real_read6502(address + 1, true, bank);
-		case 4:
-			return (real_read6502(address, true, bank) << 24) |
-			       (real_read6502(address + 1, true, bank) << 16) |
-			       (real_read6502(address + 2, true, bank) << 8) |
-			       real_read6502(address + 3, true, bank);
-		default:
-#ifdef _MSC_VER
-			__debugbreak();
-#else
-			raise(SIGTRAP);
-#endif
-	}
-
-	return 0;
-}
-
-/**
- * did we hit a breakpoint ?
- */
-static bool
-hitWatch(void)
-{
-	// check dev defined breakpoints
-	for (int i = 0; i < MAX_WATCHES; i++) {
-		if (watches[i].status == OFF) {
-			continue;
-		}
-
-		uint16_t a = watches[i].addr;
-		uint8_t  b = watches[i].bank;
-		uint32_t v = read_memory(watches[i].len, a, b);
-
-		switch (watches[i].status) {
-			case EXACT_VALUE:
-				return v == watches[i].watchFor;
-			case VALUE_CHANGED: {
-				bool t = v != watches[i].prev_value;
-				if (t) {
-					watches[i].prev_value = v;
-				}
-				return t;
-			}
-		}
-	}
-	return false;
-}
-
-/**
- * provide list of watches
- */
-static struct MHD_Response *
-remoted_watch_list(struct MHD_Connection* connection, char** next_token)
-{
-	// provide a list of watches
-	json[0] = '[';
-	json[1] = 0;
-
-	// return a list of breakpoints
-	bool first = true;
-	for (int i = 0; i < MAX_WATCHES; i++) {
-		if (watches[i].status != OFF) {
-			if (!first) {
-				strcat_s(json, sizeof(json), ",");
-			}
-			snprintf(tmp, sizeof(tmp), \
-				"{\"addr\":%d, \"bank\":%d, \"len\":%d}", \
-				watches[i].addr, \
-				watches[i].bank, \
-				watches[i].len);
-			strcat_s(json, sizeof(json), tmp);
-			first = false;
-		}
-	}
-	strcat_s(json, sizeof(json), "]");
-
-	struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
-	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
-	MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
-	MHD_queue_response(connection, MHD_HTTP_OK, response);
-	return response;
-}
-
- /**
- * Set memory WATCH breakpoint
- * /watch/bank/memory/len/value
- */
-static struct MHD_Response *
-remoted_watch(struct MHD_Connection *connection, char **next_token)
-{
-	static char *nok = "{\"status\" : \"error\", \"message\":\"no available breakpoint\"}";
-
-	char *token = strtok_s(NULL, "/", next_token);
-
-	uint8_t status = OFF;
-	uint8_t length = 0;
-	uint8_t value = 0;
-
-	if (token != NULL) {
-		// change a watch
-		uint8_t bank = (uint8_t)atoi(token);
-		char   *addr = strtok_s(NULL, "/", next_token);
-		if (token != NULL) {
-			uint16_t address = 0;
-			if (addr[0] == '0' && addr[2] == 'x') {
-				address = (uint16_t)strtol(addr + 2, NULL, 16);
-			} else {
-				address = (uint16_t)atoi(addr);
-			}
-
-			char *slength= strtok_s(NULL, "/", next_token);
-			if (slength != NULL) {
-				length = atoi(slength);
-
-				status = VALUE_CHANGED;
-				char *svalue = strtok_s(NULL, "/", next_token);
-				if (svalue != NULL) {
-					value  = atoi(svalue);
-					status = EXACT_VALUE;
-				}
-			}
-			
-			char *json = nok;
-
-			// find first available watch
-			// and check if the watch is already set
-			int index           = -1;
-			int first_available = -1;
-			for (int i = 0; i < MAX_WATCHES; i++) {
-				if (watches[i].status == OFF && first_available < 0) {
-					first_available = i;
-				}
-				else if (watches[i].addr == address && watches[i].bank == bank) {
-					index = i;
-					break;
-				}
-			}
-
-			if (index >= 0) {
-				// the watch already exists
-				switch (status) {
-					case EXACT_VALUE:
-						watches[index].watchFor = value;
-						watches[index].len      = length;
-						break;
-					case VALUE_CHANGED:
-						watches[index].len = length;
-						watches[index].prev_value = read_memory(length, address, bank);
-						break;
-					default:
-						// remove the watch
-						watches[index].status = OFF;
-				}
-				json = ok;
-			}
-			else if (first_available >= 0) {
-				// create a new watch
-				watches[first_available].addr     = address;
-				watches[first_available].bank   = bank;
-				watches[first_available].prev_value = read_memory(length, address, bank);
-				watches[first_available].len = length;
-
-				if (status == EXACT_VALUE) {
-					watches[first_available].status = EXACT_VALUE;
-					watches[first_available].watchFor = value;
-				}
-				else {
-					watches[first_available].status = VALUE_CHANGED;
-				}
-				json = ok;
-			}
-			else {
-				json = nok;	// no available slot
-			}
-
-			struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json), json, MHD_RESPMEM_PERSISTENT);
-			MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/json");
-			MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
-			MHD_queue_response(connection, MHD_HTTP_OK, response);
-			return response;
-		}
-	} else {
-		remoted_watch_list(connection, next_token);
-	}
-	const char *page = "incorect breakpoint command provided";
 	return remoted_error(connection, page);
 }
 
@@ -888,6 +981,9 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 	}
 	else if (strcmp(token, "watch") == 0) {
 		response = remoted_watch(connection, &next_token);
+	}
+	else if (strcmp(token, "vwatch") == 0) {
+		response = remoted_vera_watch(connection, &next_token);
 	}
 	else if (strcmp(token, "restart") == 0) {
 		response = remoted_restart(connection, &next_token);
