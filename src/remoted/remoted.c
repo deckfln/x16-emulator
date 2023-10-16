@@ -45,7 +45,7 @@ static struct MHD_Daemon *daemon = NULL;
 static char *ok = "{\"status\" : \"ok\"}";
 
 static char json[8192];
-static uint8_t dump[512];
+static uint8_t dump[1024];
 static char tmp[256] = {0};
 static uint16_t _start   = 0;	// target to restart the PRG
 
@@ -116,7 +116,7 @@ struct myWatch {
 	uint8_t  status;
 	uint8_t  len; // 8 bits, 16 bits, 24 bits, 32 bits
 	uint16_t addr;
-	uint16_t bank;
+	uint8_t bank;
 	uint32_t prev_value; // value at previous instruction
 	uint32_t watchFor;   // value to monitor
 };
@@ -559,12 +559,29 @@ static struct MHD_Response *
 remoted_vera_dump(struct MHD_Connection *connection, char **next_token)
 {
 	char *token = strtok_s(NULL, "/", next_token);
+	static uint8_t *dumpster = NULL;
+	static uint32_t dumpster_l = 0;
 
 	if (token != NULL) {
 		uint32_t start = (uint32_t)atoi(token);
-		uint8_t *p     = dump;
 
-		for (int i = 0; i < 256; i++) {
+		char  *length = strtok_s(NULL, "/", next_token);
+		size_t l      = 256;
+		if (length != NULL) {
+			l = (size_t)atoi(length);
+		}
+
+		if (dumpster == NULL) {
+			dumpster_l = l*2;
+			dumpster   = (uint8_t *)malloc(dumpster_l);
+		} else if (dumpster_l < l) {
+			free(dumpster);
+			dumpster_l = l * 2;
+			dumpster   = (uint8_t *)malloc(dumpster_l);
+		}
+		uint8_t *p     = dumpster;
+
+		for (int i = 0,j=0; i < l; i++, j+=2) {
 			uint32_t addr = (start + i) & 0x1FFFF;
 			uint8_t  byte = video_space_read(addr);
 			uint8_t  type = 0;
@@ -579,11 +596,15 @@ remoted_vera_dump(struct MHD_Connection *connection, char **next_token)
 				type = 4; // vram_other;
 			}
 
-			*(p++) = type;
-			*(p++) = byte;
+			dumpster[j] = type;
+			dumpster[j+1] = byte;
+
+			if (j > dumpster_l) {
+				__debugbreak();
+			}
 		}
 
-		struct MHD_Response *response = MHD_create_response_from_buffer(sizeof(dump), dump, MHD_RESPMEM_PERSISTENT);
+		struct MHD_Response *response = MHD_create_response_from_buffer(l*2, dumpster, MHD_RESPMEM_PERSISTENT);
 		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, "application/octet-stream");
 		MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
 		MHD_queue_response(connection, MHD_HTTP_OK, response);
@@ -927,6 +948,9 @@ remoted_restart(struct MHD_Connection *connection, char **next_token)
 	char *restart = _strdup("LOAD\":*\",8,1\rRUN\r");
 	prg_consumed = false;		// force ieee.c:copen to use prg_file as file description
 	machine_paste(restart);		// machine paste will free restart at the end
+
+	myStatus = CPU_RUN;			// let the emulator run
+
 	return remoted_ok(connection);
 }
 

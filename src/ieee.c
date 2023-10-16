@@ -1595,7 +1595,7 @@ static void
 cclose(int channel)
 {
 	if (log_ieee) {
-		printf("  CLOSE %d\n", channel);
+		printf("  CLOSE %d %s\n", channel, channels[channel].name);
 	}
 	channels[channel].name[0] = 0;
 	if (channels[channel].f) {
