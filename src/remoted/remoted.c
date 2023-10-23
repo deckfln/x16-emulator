@@ -579,7 +579,6 @@ remoted_vera_dump(struct MHD_Connection *connection, char **next_token)
 			dumpster_l = l * 2;
 			dumpster   = (uint8_t *)malloc(dumpster_l);
 		}
-		uint8_t *p     = dumpster;
 
 		for (int i = 0,j=0; i < l; i++, j+=2) {
 			uint32_t addr = (start + i) & 0x1FFFF;
@@ -599,9 +598,11 @@ remoted_vera_dump(struct MHD_Connection *connection, char **next_token)
 			dumpster[j] = type;
 			dumpster[j+1] = byte;
 
+#ifdef _MSC_VER
 			if (j > dumpster_l) {
 				__debugbreak();
 			}
+#endif
 		}
 
 		struct MHD_Response *response = MHD_create_response_from_buffer(l*2, dumpster, MHD_RESPMEM_PERSISTENT);
