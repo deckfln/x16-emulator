@@ -211,15 +211,21 @@ static void video_space_read_range(uint8_t* dest, uint32_t address, uint32_t siz
 static void refresh_palette();
 
 void
-mousegrab_toggle() {
+mousegrab_toggle()
+{
 	mouse_grabbed = !mouse_grabbed;
 	SDL_SetWindowGrab(window, mouse_grabbed);
 	SDL_SetRelativeMouseMode(mouse_grabbed);
 	SDL_ShowCursor((mouse_grabbed || kernal_mouse_enabled) ? SDL_DISABLE : SDL_ENABLE);
+
+#ifdef _MSC_VER
+	sprintf_s(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
+#else
 	sprintf(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
+#endif
+
 	video_update_title(window_title);
 }
-
 void
 video_reset()
 {
@@ -552,15 +558,6 @@ struct video_sprite_properties
 
 	uint16_t palette_offset;
 };
-
-void
-mousegrab_toggle() {
-	mouse_grabbed = !mouse_grabbed;
-	SDL_SetWindowGrab(window, mouse_grabbed);
-	SDL_ShowCursor((mouse_grabbed || kernal_mouse_enabled) ? SDL_DISABLE : SDL_ENABLE);
-	sprintf(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
-	video_update_title(window_title);
-}
 
 #ifndef __EMSCRIPTEN__
 static void
