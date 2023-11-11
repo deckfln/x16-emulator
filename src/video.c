@@ -40,6 +40,8 @@
 #	endif
 #endif
 
+#define APPROX_TITLEBAR_HEIGHT 30
+
 #define VERA_VERSION_MAJOR  0x00
 #define VERA_VERSION_MINOR  0x03
 #define VERA_VERSION_PATCH  0x01
@@ -209,6 +211,22 @@ static void video_space_read_range(uint8_t* dest, uint32_t address, uint32_t siz
 static void refresh_palette();
 
 void
+mousegrab_toggle()
+{
+	mouse_grabbed = !mouse_grabbed;
+	SDL_SetWindowGrab(window, mouse_grabbed);
+	SDL_SetRelativeMouseMode(mouse_grabbed);
+	SDL_ShowCursor((mouse_grabbed || kernal_mouse_enabled) ? SDL_DISABLE : SDL_ENABLE);
+
+#ifdef _MSC_VER
+	sprintf_s(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
+#else
+	sprintf(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
+#endif
+
+	video_update_title(window_title);
+}
+void
 video_reset()
 {
 	// init I/O registers
@@ -331,9 +349,17 @@ video_init(int window_scale, float screen_x_scale, char *quality, bool fullscree
 
 	SDL_SetWindowTitle(window, WINDOW_TITLE);
 	SDL_SetWindowIcon(window, CommanderX16Icon());
-	if(fullscreen) {
+	if (fullscreen) {
 		is_fullscreen = true;
 		SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+	} else {
+		int winX, winY;
+		SDL_GetWindowPosition(window, &winX, &winY);
+		if (winX < 0 || winY < APPROX_TITLEBAR_HEIGHT) {
+			winX = winX < 0 ? 0 : winX;
+			winY = winY < APPROX_TITLEBAR_HEIGHT ? APPROX_TITLEBAR_HEIGHT : winY;
+			SDL_SetWindowPosition(window, winX, winY);
+		}
 	}
 
 	SDL_SetWindowOpacity(window, opacity);
@@ -356,6 +382,9 @@ video_init(int window_scale, float screen_x_scale, char *quality, bool fullscree
 	if (debugger_enabled) {
 		DEBUGInitUI(renderer);
 	}
+
+	if (grab_mouse && !mouse_grabbed)
+		mousegrab_toggle();
 
 	return true;
 }
@@ -507,19 +536,6 @@ refresh_layer_properties(const uint8_t layer)
 	props->first_color_pos  = 8 - props->bits_per_pixel;
 	props->color_mask       = (1 << props->bits_per_pixel) - 1;
 	props->color_fields_max = (8 >> props->color_depth) - 1;
-}
-
-void
-mousegrab_toggle() {
-	mouse_grabbed = !mouse_grabbed;
-	SDL_SetWindowGrab(window, mouse_grabbed);
-	SDL_ShowCursor((mouse_grabbed || kernal_mouse_enabled) ? SDL_DISABLE : SDL_ENABLE);
-#ifdef _MSC_VER
-	sprintf_s(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
-#else
-	sprintf(window_title, WINDOW_TITLE "%s", mouse_grabbed ? MOUSE_GRAB_MSG : "");
-#endif
-	video_update_title(window_title);
 }
 
 #ifndef __EMSCRIPTEN__
@@ -1308,7 +1324,6 @@ bool
 video_update()
 {
 	static bool cmd_down = false;
-
 	bool mouse_changed = false;
 
 	// for activity LED, overlay red 8x4 square into top right of framebuffer
