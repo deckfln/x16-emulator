@@ -100,6 +100,22 @@ remoted_json(struct MHD_Connection *connection, cJSON *answer)
 }
 
 /********************************************************************
+ *		deliver emulator information
+ ********************************************************************/
+
+static struct MHD_Response *
+remoted_emulator(struct MHD_Connection *connection, char **next_token)
+{
+	cJSON *answer = cJSON_CreateObject();
+	cJSON *jmyStatus = cJSON_CreateNumber(myStatus);
+	cJSON_AddItemToObject(answer, "myStatus", jmyStatus);
+	cJSON *jmyPid = cJSON_CreateNumber(RD_pid);
+	cJSON_AddItemToObject(answer, "pid", jmyPid);
+
+	return remoted_json(connection, answer);
+}
+
+/********************************************************************
  *		manage memory & vram Watch breakpoints
  ********************************************************************/
 
@@ -908,8 +924,6 @@ remoted_cpu(struct MHD_Connection *connection, char **next_token)
 	cJSON_AddItemToObject(answer, "flags", jstatus);
 	cJSON *jmyStatus = cJSON_CreateNumber(myStatus);
 	cJSON_AddItemToObject(answer, "myStatus", jmyStatus);
-	cJSON *jmyPid= cJSON_CreateNumber(RD_pid);
-	cJSON_AddItemToObject(answer, "pid", jmyPid);
 
 	return remoted_json(connection, answer);
 }
@@ -988,6 +1002,12 @@ ahc_echo(void *cls, struct MHD_Connection *connection, const char *url, const ch
 	if (token == NULL) {
 		const char *page = "incorect command provided";
 		remoted_error(connection, page);
+	}
+	else if (strcmp(token, "emulator") == 0) {
+		response = remoted_emulator(connection, &next_token);
+	}
+	else if (strcmp(token, "vera") == 0) {
+		response = remoted_vera(connection, &next_token);
 	}
 	else if (strcmp(token, "vera") == 0) {
 		response = remoted_vera(connection, &next_token);
