@@ -39,6 +39,7 @@ char *_strdup(const char *s) {
 static int RD_pid = -1;		// current process ID
 static char *RD_prg_path = NULL;	// full path of the currently debugged PRG
 static enum REMOTED_CMD myStatus = CPU_RUN;
+static bool inBasic  = true;
 
 static struct MHD_Daemon *daemon = NULL;
 
@@ -111,6 +112,12 @@ remoted_emulator(struct MHD_Connection *connection, char **next_token)
 	cJSON_AddItemToObject(answer, "myStatus", jmyStatus);
 	cJSON *jmyPid = cJSON_CreateNumber(RD_pid);
 	cJSON_AddItemToObject(answer, "pid", jmyPid);
+
+	cJSON *jinBasic = cJSON_CreateNumber(inBasic);
+	cJSON_AddItemToObject(answer, "reachedBasic", jinBasic);
+
+	cJSON *jpc = cJSON_CreateNumber(pc);
+	cJSON_AddItemToObject(answer, "pc", jpc);
 
 	return remoted_json(connection, answer);
 }
@@ -1079,6 +1086,11 @@ remoted_close(void)
 enum REMOTED_CMD
 remoted_getStatus(void)
 {
+	if (pc == 0x080d) {
+		// leaves basic to tun a PRG
+		inBasic = false;
+	}
+
 	// detect BRK
 	if (read6502(pc) == 00) {
 		myStatus = CPU_STOP;
