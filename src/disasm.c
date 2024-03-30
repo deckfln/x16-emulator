@@ -302,7 +302,7 @@ int disasm(uint16_t pc, uint8_t *RAM, char *line, unsigned int max_line, bool de
 
 		mnemonic = malloc(len + 1);
 #ifdef _MSC_VER
-		memcpy_s((char*)mnemonic, line, len +1);
+		memcpy_s((char *)mnemonic, len + 1, line, len + 1);
 #else
 		memcpy((char*)mnemonic, line, len + 1);
 #endif
