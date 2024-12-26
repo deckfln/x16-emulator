@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "memory.h"
 #include "cpu/fake6502.h"
 #include "glue.h"
@@ -182,7 +183,7 @@ void testbench_init()
                 if (ival == -1) {
                     invalid();
                 } else {
-                    a = (uint8_t)ival;
+                    regs.a = (uint8_t)ival;
                     ready();
                 }
             }
@@ -201,7 +202,7 @@ void testbench_init()
                 if (ival == -1) {
                     invalid();
                 } else {
-                    x = (uint8_t)ival;
+                    regs.x = (uint8_t)ival;
                     ready();
                 }
             }
@@ -220,7 +221,7 @@ void testbench_init()
                 if (ival == -1) {
                     invalid();
                 } else {
-                    y = (uint8_t)ival;
+                    regs.y = (uint8_t)ival;
                     ready();
                 }
             }
@@ -239,7 +240,7 @@ void testbench_init()
                 if (ival == -1) {
                     invalid();
                 } else {
-                    status = (uint8_t)ival;
+                    regs.status = (uint8_t)ival;
                     ready();
                 }
             }
@@ -258,7 +259,7 @@ void testbench_init()
                 if (ival == -1) {
                     invalid();
                 } else {
-                    sp = (uint8_t)ival;
+                    regs.sp = (regs.sp & 0xFF00) | (uint8_t)ival;
                     ready();
                 }
             }
@@ -278,12 +279,12 @@ void testbench_init()
                 if (iaddr == -1) {
                     invalid();
                 } else {
-                    write6502(0x0100 + sp, (0xfffd -1) >> 8);
-                    sp--;
-                    write6502(0x0100 + sp, (0xfffd - 1) & 255);
-                    sp--;
-                    pc = (uint16_t)iaddr;
-                
+                    write6502(regs.sp, (0xfffd -1) >> 8);
+                    decrement_wrap_at_page_boundary(&regs.sp);
+                    write6502(regs.sp, (0xfffd - 1) & 255);
+                    decrement_wrap_at_page_boundary(&regs.sp);
+                    regs.pc = (uint16_t)iaddr;
+
                     init_done=true;
                 }
             }
@@ -302,34 +303,34 @@ void testbench_init()
                 if (iaddr == -1) {
                     invalid();
                 } else {
-                    printf("%lx\n", (long)read6502((uint16_t)iaddr));
+                    printf("%lx\n", (long)debug_read6502((uint16_t)iaddr, USE_CURRENT_BANK));
                     fflush(stdout);
                 }
             }
         }
 
         else if(strncmp(line, "RQA", 3) == 0) {             //Request accumulator value
-            printf("%lx\n", (long)a);
+            printf("%lx\n", (long)regs.a);
             fflush(stdout);
         }
 
         else if(strncmp(line, "RQX", 3) == 0) {             //Request X register value
-            printf("%lx\n", (long)x);
+            printf("%lx\n", (long)regs.xl);
             fflush(stdout);
         }
 
         else if(strncmp(line, "RQY", 3) == 0) {             //Request Y register value
-            printf("%lx\n", (long)y);
+            printf("%lx\n", (long)regs.yl);
             fflush(stdout);
         }
 
         else if(strncmp(line, "RST", 3) == 0) {             //Request status register value
-            printf("%lx\n", (long)status);
+            printf("%lx\n", (long)regs.status);
             fflush(stdout);
         }
 
         else if(strncmp(line, "RSP", 3) == 0) {             //Request stack pointer value
-            printf("%lx\n", (long)sp);
+            printf("%lx\n", (long)regs.sp);
             fflush(stdout);
         }
 

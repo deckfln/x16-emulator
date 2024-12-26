@@ -5,6 +5,57 @@
 
 ## Releases
 
+### Release R48 ("Cadmium")
+
+* Features/Fixes
+	* Emulated VERA SPI clock has been updated to half of the VERA clock speed rather than the CPU clock.
+	* Trace for ROM banks 13-15 (x16edit and Basload) is now supported [stefan-b-jakobsson]
+	* Fixed debug reads from the stack and a few unbounded values in the debugger display
+	* VERA PSG: for the saw and triangle waves, the inverse of the pulse width value is XORed with the value of the wave. This is the behavior of VERA 47.0.2 on hardware. [m00dawg]
+	* Allow setting the amount of RAM in the web version of the emulator [JimmyDansbo]
+	* Windows 11: Rounded corners should no longer cut off the lower left and lower right of the emulator window.
+	* New memory statistics feature [irmen]
+	* HostFS: Implement DOS "T"ell command
+	* Debugger now includes elapsed cpu clocks since the last breakpoint or step
+	* 65C816: Fixed stack relative indirect address calulation wrongly using the direct page [Fulgen301]
+	* 65C816: high bytes of .X and .Y are now cleared when PLP or RTI set x=1 [cnelson20]
+	* 65C816: PEI no longer does improper page wraparound, `[dp]` indirect modes now properly read the address. [Fulgen301]
+	* More changes in the [ROM](https://github.com/X16Community/x16-rom/tree/r48#release-48-cadmium).
+
+### Release 47 ("Roswell")
+
+This is a major release with numerous bugfixes, as well as introducing 65C816 support.
+
+* Features/Fixes.
+	* Optionally emulate a 65C816 CPU, selectable via a new command line switch `-c816`. There is also a `-c02` command line switch to explicitly select 65C02 mode.  [Fulgen301]
+	* In order to make room for the full 65C816 vector table, the R47 ROM relocates the "MIST" KERNAL signature from 0xFFF6 to 0xC008. Emulator has been updated to check for the signature in the newer location. [Fulgen301]
+	* Made IEC device addressing more flexible by preventing the HostFS from consuming every device number [DragWx]
+	* Improved timing calculations for HostFS operations to translate wall clock time to elapsed CPU ticks
+	* If HostFS is in use, the default `-abufs` audio buffer count is 32, otherwise 8. This should reduce audio stuttering for games which load assets from disk while sound is playing.
+	* HostFS can be changed to respond to a non-default device number. New command line option `-hostfsdev`. Using this option in conjunction with `-sdcard` allows both devices to appear on the system.
+	* Matching the VERA hardware feature, the layer config T256 bit can be used as a palette switch in tile and bitmap modes. Most useful in 2bpp and 4bpp depths, setting this bit on the layer forces the resolved high bit of the palette entry index to 1. For instance, in 4bpp mode, a tile pixel with index 1, on a tile configured with palette offset 6 would normally resolve to palette entry 0x61 (or 97 decimal), having this layer bit set will cause this pixel to resolve to palette entry 0xE1 (or 225 decmial).
+	* Copying VERA hardware behavior, the LINE IRQ can happen in the non-visible vertical blanking area.
+	* HostFS: empty filename now returns an error as appropriate
+	* IO2, the YM2151 range, is partially decoded on hardware. Emulator behavior now matches this so that the YM2151 is mirrored throughout the $9F42-$9F5F range.
+	* New command line switch `-nokeyboardcapture` causes capture mode to operate without intercepting OS-level keystrokes such as Alt+Tab.
+	* Improvements to `-wuninit` warnings to show the appropriate opcode and location of uninitialized accesses.
+	* Recognize the INTL1 key code, which exists on some keyboard layouts such as pt-BR.
+	* Update the 65C02 opcode table to properly handle multi-byte NOPs and update cycle counts.
+	* `-trace` output has been updated and enhanced, showing banks for effective addresses. Add listings for new banks.
+	* new `-longpwron` option to match SMC 47 long power button press behavior at power on.
+	* VERA FX: fix address resolution bug with 4bpp unaligned cache filling.
+	* VERA: DC_VSTOP was taking effect one scanline too late.
+	* SMC: update activity light logic. Hardware was mistakenly documented as allowing 255 PWM intensity levels, while in fact it is binary on/off.
+	* VERA PSG: update PSG volume table from VERA 47.0.0. Prior to this change, there were multiple PSG volume values at the low end that resulted in the same output level.
+	* SDL2: Set the application name to "Commander X16 Emulator", which shows up in the audio mixer, and in the screensaver inhibit application list on Linux desktop environments. This should be a bit more informative than "My SDL application".
+	* New `-pastewarp` command line switch that warps the emulator when receiving paste data either from the clipboard or from the `-bas` command line switch.
+	* HostFS: improve path parsing with both CMD and unix path syntax, particularly with absolute path names.  DOS"MD//:TEST" now creates the directory in the FS root rather than erroneously in the current directory.
+	* VERA: DC_HSCALE and DC_VSCALE values > 0x80 now render as they do on hardware.
+	* SMC 47.0.0 fast PS/2 read support
+	* Now with native build for Apple Silicon (built on the GitHub MacOS ARM runner)
+	* More changes in the [ROM](https://github.com/X16Community/x16-rom/tree/r47#release-47-roswell).
+
+
 ### Release 46 ("Winnipeg")
 
 This is mainly a bugfix release.

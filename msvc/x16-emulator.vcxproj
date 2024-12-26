@@ -138,10 +138,12 @@
   <ItemGroup>
     <ClInclude Include="..\src\audio.h" />
     <ClInclude Include="..\src\cartridge.h" />
+    <ClInclude Include="..\src\cpu\65c02.h" />
     <ClInclude Include="..\src\cpu\fake6502.h" />
     <ClInclude Include="..\src\cpu\instructions.h" />
     <ClInclude Include="..\src\cpu\mnemonics.h" />
     <ClInclude Include="..\src\cpu\modes.h" />
+    <ClInclude Include="..\src\cpu\registers.h" />
     <ClInclude Include="..\src\cpu\support.h" />
     <ClInclude Include="..\src\cpu\tables.h" />
     <ClInclude Include="..\src\debugger.h" />
@@ -163,6 +165,7 @@
     <ClInclude Include="..\src\joystick.h" />
     <ClInclude Include="..\src\keyboard.h" />
     <ClInclude Include="..\src\memory.h" />
+    <ClInclude Include="..\src\midi.h" />
     <ClInclude Include="..\src\remoted\remoted.h" />
     <ClInclude Include="..\src\rendertext.h" />
     <ClInclude Include="..\src\rom_symbols.h" />
@@ -209,6 +212,7 @@
     <ClCompile Include="..\src\keyboard.c" />
     <ClCompile Include="..\src\main.c" />
     <ClCompile Include="..\src\memory.c" />
+    <ClCompile Include="..\src\midi.c" />
     <ClCompile Include="..\src\remoted\remoted.c" />
     <ClCompile Include="..\src\rendertext.c" />
     <ClCompile Include="..\src\rtc.c" />
@@ -222,6 +226,7 @@
     <ClCompile Include="..\src\vera_spi.c" />
     <ClCompile Include="..\src\via.c" />
     <ClCompile Include="..\src\video.c" />
+    <ClCompile Include="..\src\video_win32.c" />
     <ClCompile Include="..\src\wav_recorder.c" />
     <ClCompile Include="..\src\ymglue.cpp" />
     <ClCompile Include="libunistd\unistd\dirent.cpp" />

@@ -42,9 +42,9 @@
 
 #define APPROX_TITLEBAR_HEIGHT 30
 
-#define VERA_VERSION_MAJOR  0x00
-#define VERA_VERSION_MINOR  0x03
-#define VERA_VERSION_PATCH  0x01
+#define VERA_VERSION_MAJOR  47
+#define VERA_VERSION_MINOR  0
+#define VERA_VERSION_PATCH  2
 
 #define ADDR_VRAM_START     0x00000
 #define ADDR_VRAM_END       0x20000
@@ -97,6 +97,7 @@ static SDL_Renderer *renderer;
 static SDL_Texture *sdlTexture;
 static bool is_fullscreen = false;
 bool mouse_grabbed = false;
+bool no_keyboard_capture = false;
 bool kernal_mouse_enabled = false;
 
 static uint8_t video_ram[0x20000];
@@ -214,7 +215,7 @@ void
 mousegrab_toggle()
 {
 	mouse_grabbed = !mouse_grabbed;
-	SDL_SetWindowGrab(window, mouse_grabbed);
+	SDL_SetWindowGrab(window, mouse_grabbed && !no_keyboard_capture);
 	SDL_SetRelativeMouseMode(mouse_grabbed);
 	SDL_ShowCursor((mouse_grabbed || kernal_mouse_enabled) ? SDL_DISABLE : SDL_ENABLE);
 
@@ -363,6 +364,11 @@ video_init(int window_scale, float screen_x_scale, char *quality, bool fullscree
 	}
 
 	SDL_SetWindowOpacity(window, opacity);
+
+#ifdef _WIN32
+	extern void video_win32_set_rounded_corners(SDL_Window *window);
+	video_win32_set_rounded_corners(window);
+#endif
 
 	if (record_gif != RECORD_GIF_DISABLED) {
 		if (!strcmp(gif_path+strlen(gif_path)-5, ",wait")) {
@@ -840,8 +846,8 @@ render_layer_line_tile(uint8_t layer, uint16_t y)
 	const int     eff_y               = calc_layer_eff_y(props0, y);
 	const uint8_t yy                  = eff_y & props->tileh_max;
 	const uint8_t yy_flip             = yy ^ props->tileh_max;
-	const uint32_t y_add              = (yy << (props->tilew_log2 + props->color_depth - 3));
-	const uint32_t y_add_flip         = (yy_flip << (props->tilew_log2 + props->color_depth - 3));
+	const uint32_t y_add              = (yy << ((props->tilew_log2 + props->color_depth - 3) & 31));
+	const uint32_t y_add_flip         = (yy_flip << ((props->tilew_log2 + props->color_depth - 3) & 31));
 
 	const uint32_t map_addr_begin = calc_layer_map_addr_base2(props, props->min_eff_x, eff_y);
 	const uint32_t map_addr_end   = calc_layer_map_addr_base2(props, props->max_eff_x, eff_y);
@@ -940,8 +946,11 @@ render_layer_line_tile(uint8_t layer, uint16_t y)
 		color_shift += color_shift_incr;
 
 		// Apply Palette Offset
-		if (palette_offset && col_index > 0 && col_index < 16) {
+		if (col_index > 0 && col_index < 16) {
 			col_index += palette_offset;
+			if (props->text_mode_256c) {
+				col_index |= 0x80;
+			}
 		}
 		layer_line[layer][x] = col_index;
 	}
@@ -974,8 +983,11 @@ render_layer_line_bitmap(uint8_t layer, uint16_t y)
 		uint8_t col_index = (s >> (props->first_color_pos - ((xx & props->color_fields_max) << props->color_depth))) & props->color_mask;
 
 		// Apply Palette Offset
-		if (palette_offset && col_index > 0 && col_index < 16) {
+		if (col_index > 0 && col_index < 16) {
 			col_index += palette_offset << 4;
+			if (props->text_mode_256c) {
+				col_index |= 0x80;
+			}			
 		}
 		layer_line[layer][x] = col_index;
 	}
@@ -1079,6 +1091,7 @@ render_line(uint16_t y, float scan_pos_x)
 	uint16_t vstop = reg_composer[7] << 1;
 
 	uint16_t eff_y = (eff_y_fp >> 16);
+	if (eff_y >= 480) eff_y = 480 - (y & 1);
 
 	layer_line_enable[0] = dc_video & 0x10;
 	layer_line_enable[1] = dc_video & 0x20;
@@ -1141,7 +1154,7 @@ render_line(uint16_t y, float scan_pos_x)
 	// If video output is enabled, calculate color indices for line.
 	if (out_mode != 0) {
 		// Add border after if required.
-		if (y < vstart || y > vstop) {
+		if (y < vstart || y >= vstop) {
 			uint32_t border_fill = border_color;
 			border_fill = border_fill | (border_fill << 8);
 			border_fill = border_fill | (border_fill << 16);
@@ -1157,7 +1170,7 @@ render_line(uint16_t y, float scan_pos_x)
 			const uint32_t scale = reg_composer[1];
 			for (uint16_t x = MAX(hstart, s_pos_x_p); x < hstop && x < s_pos_x; ++x) {
 				uint16_t eff_x = eff_x_fp >> 16;
-				col_line[x] = calculate_line_col_index(sprite_line_z[eff_x], sprite_line_col[eff_x], layer_line[0][eff_x], layer_line[1][eff_x]);
+				col_line[x] = (eff_x < SCREEN_WIDTH) ? calculate_line_col_index(sprite_line_z[eff_x], sprite_line_col[eff_x], layer_line[0][eff_x], layer_line[1][eff_x]) : 0;
 				eff_x_fp += (scale << 9);
 			}
 			for (uint16_t x = hstop; x < s_pos_x; ++x) {
@@ -1207,7 +1220,7 @@ update_isr_and_coll(uint16_t y, uint16_t compare)
 		sprite_line_collisions = 0;
 		isr |= 1; // VSYNC IRQ
 	}
-	if ((y < SCREEN_HEIGHT) && (y == compare)) { // LINE IRQ
+	if (y == compare) { // LINE IRQ
 		isr |= 2;
 	}
 }
@@ -1540,7 +1553,7 @@ uint32_t
 video_get_address(uint8_t sel)
 {
 	uint32_t address = io_addr[sel];
-	return address;
+	return address & 0x1ffff;
 }
 
 uint32_t
@@ -1631,7 +1644,7 @@ fx_affine_prefetch(void)
 	if (affine_x_tile >= fx_affine_map_size || affine_y_tile >= fx_affine_map_size) {
 		// We clipped, return value for tile 0
 		address = fx_affine_tile_base + (affine_y_sub_tile << (3 - fx_4bit_mode)) + (affine_x_sub_tile >> (uint8_t)fx_4bit_mode);
-		if (fx_4bit_mode) fx_nibble_bit[1] = 0;
+		fx_nibble_bit[1] = (affine_x_sub_tile & 1) >> (1 - fx_4bit_mode);
 	} else {
 		// Get the address within the tile map
 		address = fx_affine_map_base + (affine_y_tile * fx_affine_map_size) + affine_x_tile;
@@ -1640,7 +1653,7 @@ fx_affine_prefetch(void)
 		address = fx_affine_tile_base + (affine_tile_idx << (6 - fx_4bit_mode));
 		// Now add the sub-tile address
 		address += (affine_y_sub_tile << (3 - fx_4bit_mode)) + (affine_x_sub_tile >> (uint8_t)fx_4bit_mode);
-		if (fx_4bit_mode) fx_nibble_bit[1] = affine_x_sub_tile & 1;
+		fx_nibble_bit[1] = (affine_x_sub_tile & 1) >> (1 - fx_4bit_mode);
 	}
 	io_addr[1] = address;
 	io_rddata[1] = video_space_read(address);
@@ -1735,6 +1748,93 @@ fx_vram_cache_write(uint32_t address, uint8_t value, uint8_t mask)
 	}
 }
 
+uint32_t video_get_fx_accum() {
+	return fx_mult_accumulator;
+}
+uint8_t video_get_dc_value(uint8_t reg) {
+	switch (reg & 0x1F) {
+		case 0x00:
+		case 0x01:
+		case 0x02:
+		case 0x03:
+		case 0x04:
+		case 0x05:
+		case 0x06:
+		case 0x07:
+		case 0x08:
+		case 0x09:
+		case 0x0a:
+		case 0x0c:
+		case 0x0d:
+		case 0x0e:
+		case 0x0f:
+			return reg_composer[reg];
+			break;
+		case 0x0b:
+			return reg_composer[reg] & 0x3f;
+			break;
+		case 0x10: // DCSEL=4, $9F29
+			return (fx_x_pixel_position >> 16) & 0xff;
+			break;
+		case 0x11: // DCSEL=4, $9F2A
+			return ((fx_x_pixel_position >> 24) & 0x07) | (fx_x_pixel_position & 0x80);
+			break;
+		case 0x12: // DCSEL=4, $9F2B
+			return (fx_y_pixel_position >> 16) & 0xff;
+			break;
+		case 0x13: // DCSEL=4, $9F2C
+			return ((fx_y_pixel_position >> 24) & 0x07) | (fx_y_pixel_position & 0x80);
+			break;
+		case 0x14: // DCSEL=5, $9F29
+			return (fx_x_pixel_position >> 8) & 0xff;
+			break;
+		case 0x15: // DCSEL=4, $9F2A
+			return (fx_y_pixel_position >> 8) & 0xff;
+			break;
+		case 0x16: // DCSEL=5, 0x9F2B
+			if (fx_poly_fill_length >= 768) {
+				return ((fx_2bit_poly && fx_addr1_mode == 2) ? 0x00 : 0x80);
+			}
+			if (fx_4bit_mode) {
+				if (fx_2bit_poly && fx_addr1_mode == 2) {
+					return ((fx_y_pixel_position & 0x00008000) >> 8) |
+						((fx_x_pixel_position >> 11) & 0x60) |
+						((fx_x_pixel_position >> 14) & 0x10) |
+						((fx_poly_fill_length & 0x0007) << 1) |
+						((fx_x_pixel_position & 0x00008000) >> 15);
+				} else {
+					return ((!!(fx_poly_fill_length & 0xfff8)) << 7) |
+						((fx_x_pixel_position >> 11) & 0x60) |
+						((fx_x_pixel_position >> 14) & 0x10) |
+						((fx_poly_fill_length & 0x0007) << 1);
+				}
+			} else {
+				return ((!!(fx_poly_fill_length & 0xfff0)) << 7) |
+					((fx_x_pixel_position >> 11) & 0x60) |
+					((fx_poly_fill_length & 0x000f) << 1);
+			}
+			break;
+		case 0x17: // DCSEL=5, 0x9F2C
+			return ((fx_poly_fill_length & 0x03f8) >> 2);
+			break;
+		case 0x18: // DCSEL=6, 0x9F29
+			return fx_cache[0];
+			break;
+		case 0x19: // DCSEL=6, 0x9F2A
+			return fx_cache[1];
+			break;
+		case 0x1a: // DCSEL=6, 0x9F2B
+			return fx_cache[2];
+			break;
+		case 0x1b: // DCSEL=6, 0x9F2C
+			return fx_cache[3];
+			break;
+		default:
+			break;
+	}
+
+	return vera_version_string[reg % 4];
+}
 
 
 //
@@ -1767,7 +1867,7 @@ uint8_t video_read(uint8_t reg, bool debugOn) {
 				return io_rddata[reg - 3];
 			}
 
-			//bool nibble = fx_nibble_bit[reg - 3];
+			bool addr_nibble = fx_nibble_bit[reg - 3];
 			uint32_t address = get_and_inc_address(reg - 3, false);
 
 			uint8_t value = io_rddata[reg - 3];
@@ -1779,12 +1879,14 @@ uint8_t video_read(uint8_t reg, bool debugOn) {
 
 			if (fx_cache_fill) {
 				if (fx_4bit_mode) {
+					uint8_t nibble_read = (addr_nibble ? ((value & 0x0f) << 4) : (value & 0xf0));
+
 					if (fx_cache_nibble_index) {
-						fx_cache[fx_cache_byte_index] = (fx_cache[fx_cache_byte_index] & 0xf0) | (value & 0x0f);
+						fx_cache[fx_cache_byte_index] = (fx_cache[fx_cache_byte_index] & 0xf0) | (nibble_read >> 4);
 						fx_cache_nibble_index = 0;
 						fx_cache_byte_index = ((fx_cache_byte_index + 1) & 0x3);
 					} else {
-						fx_cache[fx_cache_byte_index] = (fx_cache[fx_cache_byte_index] & 0x0f) | (value & 0xf0);
+						fx_cache[fx_cache_byte_index] = (fx_cache[fx_cache_byte_index] & 0x0f) | (nibble_read);
 						fx_cache_nibble_index = 1;
 					}
 				} else {
@@ -1811,6 +1913,7 @@ uint8_t video_read(uint8_t reg, bool debugOn) {
 		case 0x0B:
 		case 0x0C: {
 			int i = reg - 0x09 + (io_dcsel << 2);
+			if (debugOn) return video_get_dc_value(i);
 			switch (i) {
 				case 0x00:
 				case 0x01:
@@ -1821,34 +1924,9 @@ uint8_t video_read(uint8_t reg, bool debugOn) {
 				case 0x06:
 				case 0x07:
 				case 0x08:
-					// DCSEL = [0,1] with any composer register, or [2] at $9f29
-					return reg_composer[i];
-					break;
 				case 0x16: // DCSEL=5, 0x9F2B
-					if (fx_poly_fill_length >= 768) {
-						return ((fx_2bit_poly && fx_addr1_mode == 2) ? 0x00 : 0x80);
-					}
-					if (fx_4bit_mode) {
-						if (fx_2bit_poly && fx_addr1_mode == 2) {
-							return ((fx_y_pixel_position & 0x00008000) >> 8) |
-								((fx_x_pixel_position >> 11) & 0x60) |
-								((fx_x_pixel_position >> 14) & 0x10) |
-								((fx_poly_fill_length & 0x0007) << 1) |
-								((fx_x_pixel_position & 0x00008000) >> 15);
-						} else {
-							return ((!!(fx_poly_fill_length & 0xfff8)) << 7) |
-								((fx_x_pixel_position >> 11) & 0x60) |
-								((fx_x_pixel_position >> 14) & 0x10) |
-								((fx_poly_fill_length & 0x0007) << 1);
-						}
-					} else {
-						return ((!!(fx_poly_fill_length & 0xfff0)) << 7) |
-							((fx_x_pixel_position >> 11) & 0x60) |
-							((fx_poly_fill_length & 0x000f) << 1);
-					}
-					break;
 				case 0x17: // DCSEL=5, 0x9F2C
-					return ((fx_poly_fill_length & 0x03f8) >> 2);
+					return video_get_dc_value(i);
 					break;
 				case 0x18: // DCSEL=6, 0x9F29
 					fx_mult_accumulator = 0;
@@ -1956,41 +2034,70 @@ void video_write(uint8_t reg, uint8_t value) {
 				printf("WRITE video_space[$%X] = $%02X\n", address, value);
 			}
 
+			uint8_t wrdata_to_use;
+			uint8_t ram_wrdata[4];
+			uint8_t nibble_mask[4];
+			uint8_t cache_to_use[4];
+
+			if (fx_multiplier) {
+				int32_t m_result = (int16_t)((fx_cache[1] << 8) | fx_cache[0]) * (int16_t)((fx_cache[3] << 8) | fx_cache[2]);
+				if (fx_subtract)
+					m_result = fx_mult_accumulator - m_result;
+				else
+					m_result = fx_mult_accumulator + m_result;
+				cache_to_use[0] = (m_result) & 0xff;
+				cache_to_use[1] = (m_result >> 8) & 0xff;
+				cache_to_use[2] = (m_result >> 16) & 0xff;
+				cache_to_use[3] = (m_result >> 24) & 0xff;
+			} else {
+				memcpy(cache_to_use, fx_cache, sizeof(fx_cache));
+			}
+
+			if (fx_cache_byte_cycling) {
+				wrdata_to_use = fx_cache[fx_cache_byte_index];
+			} else {
+				wrdata_to_use = value;
+			}
+
+			if (fx_cache_write && !fx_cache_byte_cycling) {
+				ram_wrdata[0] = cache_to_use[0];
+				ram_wrdata[1] = cache_to_use[1];
+				ram_wrdata[2] = cache_to_use[2];
+				ram_wrdata[3] = cache_to_use[3];
+			} else {
+				ram_wrdata[0] = wrdata_to_use;
+				ram_wrdata[1] = wrdata_to_use;
+				ram_wrdata[2] = wrdata_to_use;
+				ram_wrdata[3] = wrdata_to_use;
+			}
+
 			if (fx_cache_write) {
 				address &= 0x1fffc;
-				if (fx_cache_byte_cycling) {
-					fx_vram_cache_write(address+0, fx_cache[fx_cache_byte_index], value & 0x03);
-					fx_vram_cache_write(address+1, fx_cache[fx_cache_byte_index], (value >> 2) & 0x03);
-					fx_vram_cache_write(address+2, fx_cache[fx_cache_byte_index], (value >> 4) & 0x03);
-					fx_vram_cache_write(address+3, fx_cache[fx_cache_byte_index], value >> 6);
-				} else {
-					if (fx_multiplier) {
-						int32_t m_result = (int16_t)((fx_cache[1] << 8) | fx_cache[0]) * (int16_t)((fx_cache[3] << 8) | fx_cache[2]);
-						if (fx_subtract)
-							m_result = fx_mult_accumulator - m_result;
-						else
-							m_result = fx_mult_accumulator + m_result;
-						fx_vram_cache_write(address+0, (m_result) & 0xff, value & 0x03);
-						fx_vram_cache_write(address+1, (m_result >> 8) & 0xff, (value >> 2) & 0x03);
-						fx_vram_cache_write(address+2, (m_result >> 16) & 0xff, (value >> 4) & 0x03);
-						fx_vram_cache_write(address+3, (m_result >> 24) & 0xff, value >> 6);
-					} else {
-						fx_vram_cache_write(address+0, fx_cache[0], value & 0x03);
-						fx_vram_cache_write(address+1, fx_cache[1], (value >> 2) & 0x03);
-						fx_vram_cache_write(address+2, fx_cache[2], (value >> 4) & 0x03);
-						fx_vram_cache_write(address+3, fx_cache[3], value >> 6);
-					}
-				}
-			} else {
-				if (fx_cache_byte_cycling) {
+				if (fx_trans_writes) {
 					if (fx_4bit_mode) {
-						fx_vram_cache_write(address, fx_cache[fx_cache_byte_index], nibble+1);
+						nibble_mask[0] = (((ram_wrdata[0] & 0xf0) == 0) << 1) | ((ram_wrdata[0] & 0x0f) == 0);
+						nibble_mask[1] = (((ram_wrdata[1] & 0xf0) == 0) << 1) | ((ram_wrdata[1] & 0x0f) == 0);
+						nibble_mask[2] = (((ram_wrdata[2] & 0xf0) == 0) << 1) | ((ram_wrdata[2] & 0x0f) == 0);
+						nibble_mask[3] = (((ram_wrdata[3] & 0xf0) == 0) << 1) | ((ram_wrdata[3] & 0x0f) == 0);
 					} else {
-						fx_vram_cache_write(address, fx_cache[fx_cache_byte_index], 0);
+						nibble_mask[0] = (ram_wrdata[0] != 0) ? 0 : 3;
+						nibble_mask[1] = (ram_wrdata[1] != 0) ? 0 : 3;
+						nibble_mask[2] = (ram_wrdata[2] != 0) ? 0 : 3;
+						nibble_mask[3] = (ram_wrdata[3] != 0) ? 0 : 3;
 					}
 				} else {
-					fx_video_space_write(address, nibble, value); // Normal write
+					nibble_mask[0] = value & 0x3;
+					nibble_mask[1] = (value >> 2) & 0x3;
+					nibble_mask[2] = (value >> 4) & 0x3;
+					nibble_mask[3] = (value >> 6) & 0x3;
 				}
+
+				fx_vram_cache_write(address+0, ram_wrdata[0], nibble_mask[0]);
+				fx_vram_cache_write(address+1, ram_wrdata[1], nibble_mask[1]);
+				fx_vram_cache_write(address+2, ram_wrdata[2], nibble_mask[2]);
+				fx_vram_cache_write(address+3, ram_wrdata[3], nibble_mask[3]);
+			} else {
+				fx_video_space_write(address, nibble, wrdata_to_use); // Normal write
 			}
 
 			io_rddata[reg - 3] = video_space_read(io_addr[reg - 3]);
@@ -2081,8 +2188,10 @@ void video_write(uint8_t reg, uint8_t value) {
 					fx_x_pixel_increment = ((((reg_composer[0x0d] & 0x7f) << 15) + (reg_composer[0x0c] << 7)) // base value
 						| ((reg_composer[0x0d] & 0x40) ? 0xffc00000 : 0)) // sign extend if negative
 						<< 5*(!!(reg_composer[0x0d] & 0x80)); // multiply by 32 if flag set
-					// Reset subpixel to 0.5
-					fx_x_pixel_position = (fx_x_pixel_position & 0x07ff0000) | 0x00008000;
+					if (fx_addr1_mode == 1 || fx_addr1_mode == 2) {
+						// Reset subpixel to 0.5
+						fx_x_pixel_position = (fx_x_pixel_position & 0x07ff0000) | 0x00008000;
+					}
 					break;
 				case 0x0e: // DCSEL=3, $9F2B
 					fx_y_pixel_increment = ((((reg_composer[0x0f] & 0x7f) << 15) + (reg_composer[0x0e] << 7)) // base value
@@ -2093,8 +2202,10 @@ void video_write(uint8_t reg, uint8_t value) {
 					fx_y_pixel_increment = ((((reg_composer[0x0f] & 0x7f) << 15) + (reg_composer[0x0e] << 7)) // base value
 						| ((reg_composer[0x0f] & 0x40) ? 0xffc00000 : 0)) // sign extend if negative
 						<< 5*(!!(reg_composer[0x0f] & 0x80)); // multiply by 32 if flag set
-					// Reset subpixel to 0.5
-					fx_y_pixel_position = (fx_y_pixel_position & 0x07ff0000) | 0x00008000;
+					if (fx_addr1_mode == 1 || fx_addr1_mode == 2) {
+						// Reset subpixel to 0.5
+						fx_y_pixel_position = (fx_y_pixel_position & 0x07ff0000) | 0x00008000;
+					}
 					break;
 				case 0x10: // DCSEL=4, $9F29
 					fx_x_pixel_position = (fx_x_pixel_position & 0x0700ff80) | (value << 16);

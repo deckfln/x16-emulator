@@ -6,11 +6,13 @@
 #include <stdbool.h>
 #include "sdcard.h"
 
+#define SPI_CLOCK_RATE_MHZ 12.5f
+
 bool ss;
 bool busy;
 bool autotx;
 uint8_t sending_byte, received_byte;
-int outcounter;
+float outcounter;
 
 void
 vera_spi_init()
@@ -22,10 +24,10 @@ vera_spi_init()
 }
 
 void
-vera_spi_step(int clocks)
+vera_spi_step(int mhz, int clocks)
 {
 	if (busy) {
-		outcounter += clocks;
+		outcounter += (float)clocks * SPI_CLOCK_RATE_MHZ / (float)mhz;
 		if (outcounter >= 8) {
 			busy = false;
 			if (sdcard_attached) {
@@ -50,7 +52,7 @@ vera_spi_read(uint8_t reg)
 			}
 			return received_byte;
 		case 1:
-			return busy << 7 | autotx << 3 | ss;
+			return busy << 7 | autotx << 2 | ss;
 	}
 	return 0;
 }
@@ -73,7 +75,7 @@ vera_spi_write(uint8_t reg, uint8_t value)
 					sdcard_select(ss);
 				}
 			}
-			autotx = !!(value & 8);
+			autotx = !!(value & 4);
 			break;
 	}
 }

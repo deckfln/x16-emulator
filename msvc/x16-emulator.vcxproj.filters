@@ -192,6 +192,15 @@
     <ClInclude Include="libunistd\portable\Finder.h">
       <Filter>Fichiers d%27en-tête\extern</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\cpu\registers.h">
+      <Filter>Fichiers d%27en-tête\cpu</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\midi.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\cpu\65c02.h">
+      <Filter>Fichiers d%27en-tête\cpu</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\audio.c">
@@ -301,6 +310,12 @@
     </ClCompile>
     <ClCompile Include="..\src\remoted\remoted.c">
       <Filter>Fichiers sources\remoted</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\midi.c">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\video_win32.c">
+      <Filter>Fichiers sources</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

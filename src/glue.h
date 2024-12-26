@@ -13,6 +13,8 @@
 #	include <SDL.h>
 #endif
 
+#include "cpu/registers.h"
+
 //#define TRACE
 //#define PERFSTAT
 
@@ -54,8 +56,8 @@ typedef enum {
 	RECORD_GIF_ACTIVE
 } gif_recorder_state_t;
 
-extern uint8_t a, x, y, sp, status;
-extern uint16_t pc;
+extern struct regs regs;
+extern uint16_t opcode_addr;
 extern uint8_t *RAM;
 extern uint8_t ROM[];
 extern uint8_t *CART;
@@ -81,6 +83,9 @@ extern bool has_via2;
 extern uint32_t host_sample_rate;
 extern bool enable_midline;
 
+extern bool has_midi_card;
+extern uint16_t midi_card_addr;
+
 extern void machine_dump(const char* reason);
 extern void machine_reset();
 extern void machine_nmi();
@@ -93,6 +98,8 @@ extern bool video_is_tilemap_address(int addr);
 extern bool video_is_tiledata_address(int addr);
 extern bool video_is_special_address(int addr);
 
+extern int ieee_unit;
+extern bool using_hostfs;
 extern uint8_t activity_led;
 extern bool nvram_dirty;
 extern uint8_t nvram[0x40];
@@ -100,6 +107,8 @@ extern uint8_t nvram[0x40];
 extern uint8_t MHZ;
 
 extern bool mouse_grabbed;
+extern bool no_keyboard_capture;
 extern bool kernal_mouse_enabled;
 extern char window_title[];
+extern bool pwr_long_press;
 #endif

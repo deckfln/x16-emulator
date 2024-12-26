@@ -13,6 +13,7 @@
 #include "glue.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #pragma pack(push, 1)
 typedef struct {

@@ -33,6 +33,7 @@
 #endif
 #include <errno.h>
 #include <time.h>
+#include <limits.h>
 #include "memory.h"
 #include "ieee.h"
 #include "glue.h"
@@ -50,8 +51,6 @@
 
 extern SDL_RWops *prg_file;
 
-#define UNIT_NO 8
-
 #define WILDCARD_ALL 0
 #define WILDCARD_PRG 1
 #define WILDCARD_DIR 2
@@ -63,10 +62,10 @@ bool log_ieee = false;
 
 bool ieee_initialized_once = false;
 
-uint8_t error[80];
+uint8_t error[256];
 int error_len = 0;
 int error_pos = 0;
-uint8_t cmd[80];
+uint8_t cmd[256];
 int cmdlen = 0;
 int namelen = 0;
 int channel = 0;
@@ -76,6 +75,8 @@ bool opening = false;
 bool overwrite = false;
 bool path_exists = false;
 bool prg_consumed = false;
+
+int ieee_unit = 8;
 
 uint8_t *hostfscwd = NULL;
 
@@ -121,10 +122,15 @@ realpath(const char *path, char *resolved_path) {
 
 #define u8strchr(A,B) (uint8_t *)strchr((char *)A,B)
 #define u8strrchr(A,B) (uint8_t *)strrchr((char *)A,B)
+#ifdef _MSC_VER
+#	define u8strcpy(A, B, C) strcpy_s((char *)A, C, (char *)B)
+#	define u8strncpy(A, B, C) strncpy_s((char *)A, C, (char *)B, C)
+#else
 #define u8strcpy(A,B) strcpy((char *)A,(char *)B)
+#define u8strncpy(A, B, C) strncpy((char *)A, (char *)B, C)
+#endif
 #define u8strcmp(A,B) strcmp((char *)A,(char *)B)
 #define u8strncmp(A,B,C) strncmp((char *)A,(char *)B,C)
-#define u8strncpy(A,B,C) strncpy((char *)A,(char *)B,C)
 #define u8strlen(A) strlen((char *)A)
 #define u8stat(A,B) stat((char *)A,B)
 #define u8realpath(A,B) (uint8_t *)realpath((char *)A,(char *)B)
@@ -137,6 +143,7 @@ static void set_error(int e, int t, int s);
 static void cchdir(uint8_t *dir);
 static int cgetcwd(uint8_t *buf, size_t len);
 static void cseek(int channel, uint32_t pos);
+static void ctell(int channel);
 static void cmkdir(uint8_t *dir);
 static void crmdir(uint8_t *dir);
 static void cunlink(uint8_t *f);
@@ -173,7 +180,7 @@ utf8_to_iso_string(uint8_t *dst, const uint8_t *src)
 	// longer than the string (IOW, 4 terminating nulls)
 	uint8_t *s = malloc(u8strlen(src)+4);
 	memset(s, 0, u8strlen(src)+4);
-	u8strcpy(s, src);
+	u8strcpy(s, src, u8strlen(src) + 4);
 
 	uint8_t *so = s;
 
@@ -273,7 +280,7 @@ utf8_to_codepoint(uint8_t *str, int *off)
 	// longer than the string (IOW, 4 terminating nulls)
 	uint8_t *s = malloc(u8strlen(str+(*off))+4);
 	memset(s, 0, u8strlen(str+(*off))+4);
-	u8strcpy(s, str+(*off));
+	u8strcpy(s, str + (*off), u8strlen(str + (*off)) + 4);
 	
 	uint8_t *so = utf8_decode(s, &cp, &e);
 
@@ -317,7 +324,7 @@ parse_dos_filename(const uint8_t *name, bool dirhandling)
 	int i, j;
 
 	newname[u8strlen(name)] = 0;
-	
+
 	overwrite = false;
 
 	// [[@][<media 0-9>][</relative_path/> | <//absolute_path/>]:]<file_path>[*]
@@ -377,10 +384,10 @@ parse_dos_filename(const uint8_t *name, bool dirhandling)
 			}
 		}
 
-		u8strcpy(newname+j,name_ptr);
+		u8strcpy(newname + j, name_ptr, u8strlen(name));
 
 	} else {
-		u8strcpy(newname,name);
+		u8strcpy(newname, name, u8strlen(name));
 	}
 
 	return newname;
@@ -417,16 +424,16 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 	// slash(es) and all, otherwise append it to the cwd, but with a /
 	// in between
 	if (name[0] == '/' || name[0] == '\\') { // absolute
-		u8strcpy(tmp, fsroot_path);
-		u8strcpy(tmp+u8strlen(fsroot_path), name);
+		u8strcpy(tmp, fsroot_path, u8strlen(name) + u8strlen(hostfscwd) + 2);
+		u8strcpy(tmp + u8strlen(fsroot_path), name, u8strlen(name) + u8strlen(hostfscwd) + 2);
 	} else { // relative
-		u8strcpy(tmp, hostfscwd);
+		u8strcpy(tmp, hostfscwd, u8strlen(name) + u8strlen(hostfscwd) + 2);
 		tmp[u8strlen(hostfscwd)] = '/';
-		u8strcpy(tmp+u8strlen(hostfscwd)+1, name);
+		u8strcpy(tmp + u8strlen(hostfscwd) + 1, name, u8strlen(name) + u8strlen(hostfscwd) + 2);
 	}
 
 	// keep the original parsed name
-	u8strcpy(tmp2, tmp);
+	u8strcpy(tmp2, tmp, u8strlen(name) + u8strlen(hostfscwd) + 2);
 
 	if (u8strchr(tmp,'*') || u8strchr(tmp,'?')) { // oh goodie, a wildcard
 		has_wildcard_chars = true;
@@ -512,9 +519,9 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 				set_error(0x70, 0, 0);
 				return NULL;
 			}
-			u8strcpy(ret, tmp);
+			u8strcpy(ret, tmp, u8strlen(tmp) + u8strlen(dp->d_name) + 2);
 			ret[u8strlen(tmp)] = '/';
-			u8strcpy(ret+u8strlen(tmp)+1, dp->d_name);
+			u8strcpy(ret + u8strlen(tmp) + 1, dp->d_name, u8strlen(tmp) + u8strlen(dp->d_name) + 2);
 			if (wildcard_filetype) {
 				u8stat(ret, &st);
 				// in a wildcard match where the filetype is wrong, mark as not found
@@ -566,15 +573,18 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 				set_error(0x70, 0, 0);
 				return NULL;
 			}
-			u8strcpy(tmp, name);
+			u8strcpy(tmp, name, u8strlen(name) + 1);
 			c = u8strrchr(tmp, '/');
-			if (c == NULL)
-				c = u8strrchr(tmp, '\\');
-			if (c != NULL)
-				*c = 0; // truncate string here
+			d = u8strrchr(tmp, '\\');
+			if (c > d) {
+				*c = 0;
+			} else if (d != NULL) {
+				*d = 0;
+				c = d;
+			}
 
 			// assemble a path with what we have left
-			ret = malloc(u8strlen(tmp)+u8strlen(hostfscwd)+2);
+			ret = malloc(u8strlen(name)+u8strlen(hostfscwd)+2);
 			if (ret == NULL) {
 				free(tmp);
 				set_error(0x70, 0, 0);
@@ -582,17 +592,21 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 			}
 
 			if (name[0] == '/' || name[0] == '\\') { // absolute
-				u8strcpy(ret, fsroot_path);
-				u8strcpy(ret+u8strlen(fsroot_path), tmp);
+				u8strcpy(ret, fsroot_path, u8strlen(name) + u8strlen(hostfscwd) + 2);
+				if (c == tmp) { // leading slash was the only slash
+					*tmp = name[0];
+					c = NULL;
+				}
+				u8strcpy(ret + u8strlen(fsroot_path), tmp, u8strlen(name) + u8strlen(hostfscwd) + 2);
 			} else { // relative
-				u8strcpy(ret, hostfscwd);
+				u8strcpy(ret, hostfscwd, u8strlen(name) + u8strlen(hostfscwd) + 2);
 				*(ret+u8strlen(hostfscwd)) = '/';
-				u8strcpy(ret+u8strlen(hostfscwd)+1, tmp);
+				u8strcpy(ret + u8strlen(hostfscwd) + 1, tmp, u8strlen(name) + u8strlen(hostfscwd) + 2);
 			}
 
 			free(tmp);
 
-			// if we found a path separator in the name string
+			// if we found a path separator in the name string (non-leading)
 			// we check everything up to that final separator
 			if (c != NULL) {
 				tmp = u8realpath(ret, NULL);
@@ -610,9 +624,9 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 						set_error(0x70, 0, 0);
 						return NULL;
 					}
-					u8strcpy(ret, hostfscwd);
+					u8strcpy(ret, hostfscwd, u8strlen(name) + u8strlen(hostfscwd) + 2);
 					ret[u8strlen(hostfscwd)] = '/';
-					u8strcpy(ret+u8strlen(hostfscwd)+1, name);
+					u8strcpy(ret + u8strlen(hostfscwd) + 1, name, u8strlen(name) + u8strlen(hostfscwd) + 2);
 				}
 			}
 		}
@@ -622,7 +636,6 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 
 	if (ret == NULL)
 		return ret;
-
 
 	// Prevent resolving outside the fsroot_path
 	if (u8strlen(fsroot_path) > u8strlen(ret)) {
@@ -780,9 +793,9 @@ continue_directory_listing(uint8_t *data)
 			size_t nl = u8strlen(dp->d_name);
 			size_t pl = u8strlen(hostfscwd);
 			uint8_t *tn = malloc(nl+pl+3);
-			u8strcpy(tn, hostfscwd);
+			u8strcpy(tn, hostfscwd, nl+pl+3);
 			*(tn+pl) = '/';
-			u8strcpy(tn+pl+1, dp->d_name);
+			u8strcpy(tn+pl+1, dp->d_name, nl+3);
 			u8stat(tn, &st);
 			free(tn);
 
@@ -932,7 +945,7 @@ continue_directory_listing(uint8_t *data)
 
 			data += sprintf((char *)data, "%02X %08X ", attrbyte, (unsigned int)fullsize);
 		}
-		
+
 		free(tmpnam);
 
 		*data++ = 0;
@@ -999,7 +1012,7 @@ create_cwd_listing(uint8_t *data)
 	}
 	int i = u8strlen(hostfscwd);
 	int j = u8strlen(fsroot_path);
-	u8strcpy(tmp,hostfscwd);
+	u8strcpy(tmp, hostfscwd, u8strlen(hostfscwd) + 1);
 
 	for(; i>= j-1; --i) {
 		// find the beginning of a path element
@@ -1009,7 +1022,7 @@ create_cwd_listing(uint8_t *data)
 		tmp[i-1]=0;
 
 		if (i < j) {
-			u8strcpy(tmp+i,"/");
+			u8strcpy(tmp + i, "/", u8strlen(hostfscwd) + 1);
 		}
 
 		file_size = 0;
@@ -1072,7 +1085,7 @@ create_cwd_listing(uint8_t *data)
 
 
 
-static char*
+static const char*
 error_string(int e)
 {
 	switch(e) {
@@ -1143,9 +1156,9 @@ set_activity(bool active)
 }
 
 static void
-set_error(int e, int t, int s)
+set_error_text(int e, const char *text, int t, int s)
 {
-	snprintf((char *)error, sizeof(error), "%02x,%s,%02d,%02d\r", e, error_string(e), t, s);
+	snprintf((char *)error, sizeof(error), "%02x,%s,%02d,%02d\r", e, text, t, s);
 	error_len = u8strlen(error);
 	error_pos = 0;
 	uint8_t cbdos_flags = get_kernal_cbdos_flags();
@@ -1155,6 +1168,12 @@ set_error(int e, int t, int s)
 		cbdos_flags |= 0x20; // set error flag
 	}
 	set_kernal_cbdos_flags(cbdos_flags);
+}
+
+static void
+set_error(int e, int t, int s)
+{
+	set_error_text(e, error_string(e), t, s);
 }
 
 static void
@@ -1181,8 +1200,8 @@ command(uint8_t *cmd)
 		case 'C': // C (copy), CD (change directory), CP (change partition)
 			switch(cmd[1]) {
 				case 'D': // Change directory
-						cchdir(cmd+2);
-						return;
+					cchdir(cmd+2);
+					return;
 				case 'P': // Change partition
 					set_error(0x02, 0, 0);
 					return;
@@ -1222,18 +1241,38 @@ command(uint8_t *cmd)
 		case 'S':
 			switch(cmd[1]) {
 				case '-': // Swap
-					set_error(0x31, 0, 0);
+					if (cmd[2] == '8' || cmd[2] == 'D') {
+						ieee_unit = 8;
+						clear_error();
+					} else if (cmd[2] == '9') {
+						ieee_unit = 9;
+						clear_error();
+					} else {
+						set_error(0x31, 0, 0);
+					}
 					return;
 				default: // Scratch
 					cunlink(cmd); // Need to parse out the arg in this function
 					return;
 			}	
+		case 'T': // Tell
+			ctell(cmd[1]);
+			return;
 		case 'U':
 			switch(cmd[1]) {
 				case 'I': // UI: Reset
 					set_error(0x73, 0, 0);
 					return;
+				case '0': // U0
+					if (cmd[2] == '>') {
+						if (cmd[3] >= 8 && cmd[3] <= 15) {
+							ieee_unit = cmd[3];
+							clear_error();
+							return;
+						}
+					}
 			}
+
 		default:
 			if (log_ieee) {
 				printf("    (unsupported command ignored)\n");
@@ -1340,7 +1379,7 @@ crename(uint8_t *f)
 		set_error(0x70, 0, 0);
 		return;
 	}
-	u8strcpy(tmp,f);
+	u8strcpy(tmp, f, u8strlen(f) + 1);
 	uint8_t *d = u8strchr(tmp,':');
 
 	if (d == NULL) {
@@ -1452,7 +1491,7 @@ cunlink(uint8_t *f)
 		set_error(0x70, 0, 0);
 		return;
 	}
-	u8strcpy(tmp,f);
+	u8strcpy(tmp, f, u8strlen(f) + 1);
 	uint8_t *fn = u8strchr(tmp,':');
 
 	if (fn == NULL) {
@@ -1535,6 +1574,11 @@ copen(int channel)
 		printf("  OPEN \"%s\",%d (%s%s)\n", channels[channel].name, channel,
 			channels[channel].read ? "R" : "",
 			channels[channel].write ? "W" : "");
+	}
+	
+	if (channels[channel].name[0] == 0) { // empty filename
+		set_error(0x34, 0, 0);
+		return -2;
 	}
 
 	if (!channels[channel].write && channels[channel].name[0] == '$') {	
@@ -1621,6 +1665,34 @@ cseek(int channel, uint32_t pos)
 
 	if (channels[channel].f) {
 		SDL_RWseek(channels[channel].f, pos, RW_SEEK_SET);
+	} else {
+		set_error(0x70, 0, 0);
+	}
+}
+
+static void
+ctell(int channel)
+{
+	char buf[32];
+
+	if (channel == 15) {
+		set_error(0x30, 0, 0);
+		return;
+	}
+
+	if (channels[channel].f) {
+		uint64_t pos = SDL_RWtell(channels[channel].f);
+		uint64_t siz = SDL_RWsize(channels[channel].f);
+		if (pos > 0xffffffffULL) {
+			pos = 0xffffffff;
+		}
+		if (siz > 0xffffffffULL) {
+			siz = 0xffffffff;
+		}
+		snprintf((char *)buf, sizeof(buf), "%08X %08X", (uint32_t)pos, (uint32_t)siz);
+		set_error_text(0x07, buf, 0, 0);
+	} else {
+		set_error(0x70, 0, 0);
 	}
 }
 
@@ -1693,22 +1765,22 @@ ieee_init()
 		fprintf(stderr, "Failed to allocate memory for hostfscwd\n");
 		exit(1);
 	}
-	u8strcpy(hostfscwd, startin_path);
+	u8strcpy(hostfscwd, startin_path, u8strlen(startin_path) + 1);
 
 	// Locate and remember cbdos_flags variable address in KERNAL vars
 	{
 		// check JMP instruction at ACPTR API
-		if (real_read6502(0xffa5, true, 0) != 0x4c) goto fail;
+		if (debug_read6502(0xffa5, 0) != 0x4c) goto fail;
 
 		// get address of ACPTR routine
-		uint16_t kacptr = real_read6502(0xffa6, true, 0) | real_read6502(0xffa7, true, 0) << 8;
+		uint16_t kacptr = debug_read6502(0xffa6, 0) | debug_read6502(0xffa7, 0) << 8;
 		if (kacptr < 0xc000) goto fail;
 
 		// first instruction is BIT cbdos_flags
-		if (real_read6502(kacptr, true, 0) != 0x2c) goto fail;
+		if (debug_read6502(kacptr, 0) != 0x2c) goto fail;
 
 		// get the address of cbdos_flags
-		cbdos_flags = real_read6502(kacptr+1, true, 0) | real_read6502(kacptr+2, true, 0) << 8;
+		cbdos_flags = debug_read6502(kacptr+1, 0) | debug_read6502(kacptr+2, 0) << 8;
 
 		if (cbdos_flags < 0x0200 || cbdos_flags >= 0x0400) goto fail;
 		goto success;
@@ -1726,10 +1798,10 @@ int
 SECOND(uint8_t a)
 {
 	int ret = -1;
-	if (log_ieee) {
-		printf("%s $%02x\n", __func__, a);
-	}
 	if (listening) {
+		if (log_ieee) {
+			printf("%s $%02x\n", __func__, a);
+		}
 		channel = a & 0xf;
 		opening = false;
 		if (channel == 15)
@@ -1751,19 +1823,25 @@ SECOND(uint8_t a)
 				namelen = 0;
 				break;
 		}
+	} else {
+		ret = -2;	// Not listening, do not handle.
 	}
 	return ret;
 }
 
-void
+int
 TKSA(uint8_t a)
 {
-	if (log_ieee) {
-		printf("%s $%02x\n", __func__, a);
-	}
+	int ret = -1;
 	if (talking) {
+		if (log_ieee) {
+			printf("%s $%02x\n", __func__, a);
+		}
 		channel = a & 0xf;
+	} else {
+		ret = -2;	// Not talking, do not handle.
 	}
+	return ret;
 }
 
 
@@ -1771,53 +1849,57 @@ int
 ACPTR(uint8_t *a)
 {
 	int ret = 0;
-	if (channel == 15) {
-		*a = error[error_pos++];
-		if (error_pos >= error_len) {
-			clear_error();
-			ret = 0x40; // EOI
+	if (talking) {
+		if (log_ieee) {
+			printf("%s-> $%02x\n", __func__, *a);
 		}
-	} else if (channels[channel].read) {
-		if (channels[channel].name[0] == '$') {
-			if (dirlist_pos < dirlist_len) {
-				*a = dirlist[dirlist_pos++];
-			} else {
-				*a = 0;
+		if (channel == 15) {
+			*a = error[error_pos++];
+			if (error_pos >= error_len) {
+				clear_error();
+				ret = 0x40; // EOI
 			}
-			if (dirlist_pos == dirlist_len) {
-				if (dirlist_eof) {
-					ret = 0x40;
+		} else if (channels[channel].read) {
+			if (channels[channel].name[0] == '$') {
+				if (dirlist_pos < dirlist_len) {
+					*a = dirlist[dirlist_pos++];
 				} else {
-					dirlist_pos = 0;
-					dirlist_len = continue_directory_listing(dirlist);
+					*a = 0;
 				}
-			}
-		} else if (channels[channel].f) {
-			if (SDL_RWread(channels[channel].f, a, 1, 1) != 1) {
+				if (dirlist_pos == dirlist_len) {
+					if (dirlist_eof) {
+						ret = 0x40;
+					} else {
+						dirlist_pos = 0;
+						dirlist_len = continue_directory_listing(dirlist);
+					}
+				}
+			} else if (channels[channel].f) {
+				if (SDL_RWread(channels[channel].f, a, 1, 1) != 1) {
+					ret = 0x42;
+					*a = 0;
+				} else {
+					// We need to send EOI on the last byte of the file.
+					// We have to check every time since CMDR-DOS
+					// supports random access R/W mode
+
+					Sint64 curpos = SDL_RWtell(channels[channel].f);
+					if (curpos == SDL_RWseek(channels[channel].f, 0, RW_SEEK_END)) {
+						ret = 0x40;
+						channels[channel].read = false;
+						cclose(channel);
+					} else {
+						SDL_RWseek(channels[channel].f, curpos, RW_SEEK_SET);
+					}
+				}
+			} else {
 				ret = 0x42;
-				*a = 0;
-			} else {
-				// We need to send EOI on the last byte of the file.
-				// We have to check every time since CMDR-DOS
-				// supports random access R/W mode
-				
-				Sint64 curpos = SDL_RWtell(channels[channel].f);
-				if (curpos == SDL_RWseek(channels[channel].f, 0, RW_SEEK_END)) {
-					ret = 0x40;
-					channels[channel].read = false;
-					cclose(channel);
-				} else {
-					SDL_RWseek(channels[channel].f, curpos, RW_SEEK_SET);
-				}
 			}
 		} else {
-			ret = 0x42;
+			ret = 0x42; // FNF
 		}
 	} else {
-		ret = 0x42; // FNF
-	}
-	if (log_ieee) {
-		printf("%s-> $%02x\n", __func__, *a);
+		ret = -2;	// Not talking, do not handle.
 	}
 	return ret;
 }
@@ -1826,19 +1908,19 @@ int
 CIOUT(uint8_t a)
 {
 	int ret = 0;
-	if (log_ieee) {
-		printf("%s $%02x\n", __func__, a);
-	}
 	if (listening) {
+		if (log_ieee) {
+			printf("%s $%02x\n", __func__, a);
+		}
 		if (opening) {
 			if (namelen < sizeof(channels[channel].name) - 1) {
 				channels[channel].name[namelen++] = a;
 			}
 		} else {
 			if (channel == 15) {
-				// P command takes binary parameters, so we can't terminate
+				// P/T commands take binary parameters, so we can't terminate
 				// the command on CR.
-				if ((a == 13) && (cmd[0] != 'P')) {
+				if ((a == 13) && (cmd[0] != 'P' && cmd[0] != 'T')) {
 					cmd[cmdlen] = 0;
 					command(cmd);
 					cmdlen = 0;
@@ -1854,100 +1936,122 @@ CIOUT(uint8_t a)
 				ret = 2; // FNF
 			}
 		}
+	} else {
+		ret = -2;	// Not listening, do not handle.
 	}
 	return ret;
 }
 
-void
+int
 UNTLK() {
-	if (log_ieee) {
-		printf("%s\n", __func__);
+	if (talking) {
+		if (log_ieee) {
+			printf("%s\n", __func__);
+		}
+		talking = false;
+		set_activity(false);
+		return -1;
+	} else {
+		return -2;
 	}
-	talking = false;
-	set_activity(false);
 }
 
 int
 UNLSN() {
-	int ret = -1;
-	if (log_ieee) {
-		printf("%s\n", __func__);
+	if (listening) {
+		if (log_ieee) {
+			printf("%s\n", __func__);
+		}
+		listening = false;
+		set_activity(false);
+		if (opening) {
+			channels[channel].name[namelen] = 0; // term
+			opening = false;
+			copen(channel);
+		} else if (channel == 15) {
+			cmd[cmdlen] = 0;
+			command(cmd);
+			cmdlen = 0;
+		}
+		return -1;
+	} else {
+		return -2;
 	}
-	listening = false;
-	set_activity(false);
-	if (opening) {
-		channels[channel].name[namelen] = 0; // term
-		opening = false;
-		copen(channel);
-	} else if (channel == 15) {
-		cmd[cmdlen] = 0;
-		command(cmd);
-		cmdlen = 0;
+}
+
+int
+LISTEN(uint8_t a)
+{
+	int ret = -1;
+	if ((a & 0x1f) == ieee_unit) {
+		if (log_ieee) {
+			printf("%s $%02x\n", __func__, a);
+		}
+		listening = true;
+		set_activity(true);
+	} else {
+		ret = -2;	// Not us, do not handle.
 	}
 	return ret;
 }
 
-void
-LISTEN(uint8_t a)
-{
-	if (log_ieee) {
-		printf("%s $%02x\n", __func__, a);
-	}
-	if ((a & 0x1f) == UNIT_NO) {
-		listening = true;
-		set_activity(true);
-	}
-}
-
-void
+int
 TALK(uint8_t a)
 {
-	if (log_ieee) {
-		printf("%s $%02x\n", __func__, a);
-	}
-	if ((a & 0x1f) == UNIT_NO) {
+	int ret = -1;
+	if ((a & 0x1f) == ieee_unit) {
+		if (log_ieee) {
+			printf("%s $%02x\n", __func__, a);
+		}
 		talking = true;
 		set_activity(true);
+	} else {
+		ret = -2;	// Not us, do not handle.
 	}
+	return ret;
 }
 
 int
 MACPTR(uint16_t addr, uint16_t *c, uint8_t stream_mode)
 {
-	int ret = 0;
-	int count = *c ? 0 : 256;
-	uint8_t ram_bank = read6502(0);
-	int i = 0;
-	if (channels[channel].f) {
-		do {
-			uint8_t byte = 0;
-			ret = ACPTR(&byte);
-			write6502(addr, byte);
-			i++;
-			if (!stream_mode) {
-				addr++;
-				if (addr == 0xc000) {
-					addr = 0xa000;
-					ram_bank++;
-					write6502(0, ram_bank);
+	if (talking) {
+		int ret = 0;
+		int count = *c ? 0 : 256;
+		uint8_t ram_bank = read6502(0);
+		int i = 0;
+		if (channels[channel].f) {
+			do {
+				uint8_t byte = 0;
+				ret = ACPTR(&byte);
+				write6502(addr, byte);
+				i++;
+				if (!stream_mode) {
+					addr++;
+					if (addr == 0xc000) {
+						addr = 0xa000;
+						ram_bank++;
+						write6502(0, ram_bank);
+					}
 				}
-			}
-			if (ret > 0) {
-				break;
-			}
-		} while(i < count);
+				if (ret > 0) {
+					break;
+				}
+			} while(i < count);
+		} else {
+			ret = -3; // unsupported
+		}
+		*c = i;
+		return ret;
 	} else {
-		ret = -2;
+		return -2; // not us, do not handle
 	}
-	*c = i;
-	return ret;
 }
 
 int
 MCIOUT(uint16_t addr, uint16_t *c, uint8_t stream_mode)
 {
 	int ret = 0;
-	int count = *c ? 0 : 256;
+	int count = *c ? 0: 256;
 	uint8_t ram_bank = read6502(0);
 	int i = 0;
 	if (channels[channel].f && channels[channel].write) {
