@@ -32,6 +32,7 @@
 static void DEBUGHandleKeyEvent(SDL_Keycode key,int isShift);
 
 static void DEBUGNumber(int x,int y,int n,int w, SDL_Color colour);
+static void DEBUGNumberDec(int x, int y, int n, int w, SDL_Color colour);
 static void DEBUGAddress(int x, int y, int bank, int addr, SDL_Color colour);
 static void DEBUGVAddress(int x, int y, int addr, SDL_Color colour);
 
@@ -120,6 +121,7 @@ int currentData = 0;                                     // Current data display
 int currentPCBank = -1;
 int currentBank = -1;
 int currentMode = DMODE_RUN;                             // Start running.
+uint32_t debugCPUClocks = 0;
 
 int dumpmode          = DDUMP_RAM;
 
@@ -281,22 +283,26 @@ static void DEBUGHandleKeyEvent(SDL_Keycode key,int isShift) {
 
 		case DBGKEY_STEP:								// Single step (F11 by default)
 			currentMode = DMODE_STEP; 						// Runs once, then switches back.
+			debugCPUClocks = clockticks6502;
 			break;
 
 		case DBGKEY_STEPOVER:								// Step over (F10 by default)
-			opcode = real_read6502(regs.pc, true, currentPCBank);			// What opcode is it ?
+			opcode = debug_read6502(regs.pc, currentPCBank);			// What opcode is it ?
 			if (opcode == 0x20 || opcode == 0xFC || opcode == 0x22) { 		// Is it JSR or JSL ?
 				stepBreakPoint.pc = regs.pc + 3 + (opcode == 0x22);			// Then break 3 / 4 on.
 				stepBreakPoint.bank = getCurrentBank(regs.pc);
 				currentMode = DMODE_RUN;					// And run.
+				debugCPUClocks = clockticks6502;
 				timing_init();
 			} else {
 				currentMode = DMODE_STEP;					// Otherwise single step.
+				debugCPUClocks = clockticks6502;
 			}
 			break;
 
 		case DBGKEY_RUN:								// F5 Runs until Break.
 			currentMode = DMODE_RUN;
+			debugCPUClocks = clockticks6502;
 			timing_init();
 			break;
 
@@ -666,7 +672,7 @@ static int DEBUGRenderZeroPageRegisters(int y) {
 			DEBUGString(dbgRenderer, DBG_ZP_REG, y, lbl, col_label);
 
 			int reg_addr = 2 + reg * 2;
-			int n = real_read6502(direct_page_add(reg_addr+1), true, currentBank)*256+real_read6502(direct_page_add(reg_addr), true, currentBank);
+			int n = debug_read6502(direct_page_add(reg_addr+1), USE_CURRENT_BANK)*256+debug_read6502(direct_page_add(reg_addr), USE_CURRENT_BANK);
 
 			DEBUGNumber(DBG_ZP_REG+5, y, n, 4, col_data);
 
@@ -701,7 +707,7 @@ static void DEBUGRenderData(int y,int data) {
 
 		for (int i = 0;i < 8;i++) {
 			bool isDP = ((data+i - regs.dp) & 0xffff) < 256;
-			int byte = real_read6502((data+i) & 0xFFFF, true, currentBank);
+			int byte = debug_read6502((data+i) & 0xFFFF, currentBank);
 			DEBUGNumber(DBG_MEMX+8+i*3,y,byte,2, isDP ? col_directpage : col_data);
 			DEBUGWrite(dbgRenderer, DBG_MEMX+33+i,y,byte, isDP ? col_directpage : col_data);
 		}
@@ -760,7 +766,7 @@ static void DEBUGRenderCode(int lines, int initialPC) {
 		// still been true without the added logic, anyway.
 
 		if (regs.is65c816) {
-			opcode = real_read6502(initialPC, true, currentPCBank);
+			opcode = debug_read6502(initialPC, currentPCBank);
 			switch (opcode) {
 				case 0x81: // CLC
 					implied_status &= ~FLAG_CARRY;
@@ -769,11 +775,11 @@ static void DEBUGRenderCode(int lines, int initialPC) {
 					implied_status |= FLAG_CARRY;
 					;;
 				case 0xC2: // REP
-					operand = real_read6502((initialPC+1) & 0xffff, true, currentPCBank);
+					operand = debug_read6502((initialPC+1) & 0xffff, currentPCBank);
 					implied_status = ~operand & implied_status;
 					;;
 				case 0xE2: // SEP
-					operand = real_read6502((initialPC+1) & 0xffff, true, currentPCBank);
+					operand = debug_read6502((initialPC+1) & 0xffff, currentPCBank);
 					implied_status = operand | implied_status;
 					;;
 				case 0xFB: // XCE
@@ -787,7 +793,7 @@ static void DEBUGRenderCode(int lines, int initialPC) {
 			if (implied_e) implied_status |= FLAG_INDEX_WIDTH | FLAG_MEMORY_WIDTH;
 
 		}
-		int size = disasm(initialPC, RAM, buffer, sizeof(buffer), true, currentPCBank, implied_status, &eff_addr);	// Disassemble code
+		int size = disasm(initialPC, RAM, buffer, sizeof(buffer), currentPCBank, implied_status, &eff_addr);	// Disassemble code
 		// Output assembly highlighting PC
 		DEBUGString(dbgRenderer, DBG_ASMX+8, y, buffer, initialPC == regs.pc ? col_highlight : col_data);
 		// Populate effective address
@@ -893,7 +899,7 @@ static int DEBUGRenderRegisters(void) {
 }
 
 
-static char *vera_labels[] = { "ADDR0", "ADDR1", "DATA0","DATA1", "CTRL", "VIDEO", "HSCLE", "VSCLE", "FXCTL", "FXMUL", "CACHE", "ACCUM", NULL };
+static char *vera_labels[] = { "ADDR0", "ADDR1", "DATA0","DATA1", "CTRL", "VIDEO", "HSCLE", "VSCLE", "FXCTL", "FXMUL", "CACHE", "ACCUM", "", "CLOCKS ELAPSED", NULL };
 
 static void DEBUGRenderVERAState(int y) {
 	int n=0;
@@ -920,6 +926,8 @@ static void DEBUGRenderVERAState(int y) {
 	DEBUGNumber(DBG_VERA_REGX+12, yc++, video_get_dc_value(27), 2, col_data);
 	DEBUGNumber(DBG_VERA_REGX+6, yc++, video_get_fx_accum(), 8, col_data);
 
+	yc+=2;
+	DEBUGNumberDec(DBG_VERA_REGX, yc++, clockticks6502 - debugCPUClocks, 14, col_data);
 }
 
 // *******************************************************************************************
@@ -935,7 +943,7 @@ static void DEBUGRenderStack(int bytesCount) {
 	int y= 0;
 	while (y < bytesCount) {
 		DEBUGNumber(DBG_STCK,y, sp,4, col_label);
-		int byte = real_read6502(sp, false, 0);
+		int byte = debug_read6502(sp, USE_CURRENT_BANK);
 		DEBUGNumber(DBG_STCK+5,y,byte,2, col_data);
 		DEBUGWrite(dbgRenderer, DBG_STCK+9,y,byte, col_data);
 		y++;
@@ -954,6 +962,32 @@ static void DEBUGNumber(int x, int y, int n, int w, SDL_Color colour) {
 	snprintf(fmtString, sizeof(fmtString), "%%0%dX", w);
 	snprintf(buffer, sizeof(buffer), fmtString, n);
 	DEBUGString(dbgRenderer, x, y, buffer, colour);
+}
+
+// *******************************************************************************************
+//
+//					Write Decimal Constant with thousands separator
+//
+// *******************************************************************************************
+
+static void DEBUGNumberDec(int x, int y, int n, int w, SDL_Color colour) {
+	char buf1[32], buf2[32];
+	int i,j;
+	snprintf(buf1, sizeof(buf1), "%d", n);
+	buf2[sizeof(buf2)-1] = 0; // null terminate string
+	int count = 0;
+	for (i=strlen(buf1) - 1, j=sizeof(buf2) - 1; i >= 0 && j > 1; i--) {
+		buf2[--j] = buf1[i];
+		count++;
+
+		if (count == 3) {
+			buf2[--j] = ' ';
+			count = 0;
+		}
+	}
+
+	if (buf2[j] == ' ') j++;
+	DEBUGString(dbgRenderer, x+(w-strlen(buf2+j)), y, buf2+j, colour);
 }
 
 // *******************************************************************************************

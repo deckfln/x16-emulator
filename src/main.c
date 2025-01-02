@@ -50,6 +50,7 @@
 #include "wav_recorder.h"
 #include "testbench.h"
 #include "cartridge.h"
+#include "midi.h"
 #include "remoted/remoted.h"
 
 #ifdef __EMSCRIPTEN__
@@ -140,6 +141,9 @@ bool remote_debugger = false;
 bool ym2151_irq_support = false;
 char *cartridge_path = NULL;
 
+bool has_midi_card = false;
+uint16_t midi_card_addr;
+
 bool using_hostfs = true;
 
 uint8_t MHZ = 8;
@@ -219,6 +223,21 @@ label_for_address(uint16_t address)
 			labels = labels_bankC;
 			count = sizeof(addresses_bankC) / sizeof(uint16_t);
 			break;
+		case 13:
+			addresses = addresses_bankD;
+			labels = labels_bankD;
+			count = sizeof(addresses_bankD) / sizeof(uint16_t);
+			break;
+		case 14:
+			addresses = addresses_bankE;
+			labels = labels_bankE;
+			count = sizeof(addresses_bankE) / sizeof(uint16_t);
+			break;
+		case 15:
+			addresses = addresses_bankF;
+			labels = labels_bankF;
+			count = sizeof(addresses_bankF) / sizeof(uint16_t);
+			break;
 		default:
 			addresses = NULL;
 			labels = NULL;
@@ -256,6 +275,9 @@ lst_for_address(uint16_t address)
 		case 10: lst = lst_bankA; break;
 		case 11: lst = lst_bankB; break;
 		case 12: lst = lst_bankC; break;
+		case 13: lst = lst_bankD; break;
+		case 14: lst = lst_bankE; break;
+		case 15: lst = lst_bankF; break;
 		default:
 			return NULL;
 	}
@@ -324,6 +346,7 @@ machine_reset()
 	video_reset();
 	mouse_state_init();
 	reset6502(regs.is65c816);
+	midi_serial_init();
 }
 
 void
@@ -355,14 +378,14 @@ static bool
 is_kernal()
 {
 	// only for KERNAL
-	return (read6502(0xfff6) == 'M' &&
-			read6502(0xfff7) == 'I' &&
-			read6502(0xfff8) == 'S' &&
-			read6502(0xfff9) == 'T')
-		|| (read6502(0xc008) == 'M' &&
-			read6502(0xc009) == 'I' &&
-			read6502(0xc00a) == 'S' &&
-			read6502(0xc00b) == 'T');
+	return (debug_read6502(0xfff6, USE_CURRENT_BANK) == 'M' &&
+			debug_read6502(0xfff7, USE_CURRENT_BANK) == 'I' &&
+			debug_read6502(0xfff8, USE_CURRENT_BANK) == 'S' &&
+			debug_read6502(0xfff9, USE_CURRENT_BANK) == 'T')
+		|| (debug_read6502(0xc008, USE_CURRENT_BANK) == 'M' &&
+			debug_read6502(0xc009, USE_CURRENT_BANK) == 'I' &&
+			debug_read6502(0xc00a, USE_CURRENT_BANK) == 'S' &&
+			debug_read6502(0xc00b, USE_CURRENT_BANK) == 'T');
 }
 
 static void
@@ -471,6 +494,8 @@ usage()
 	printf("\tSet all RAM to zero instead of uninitialized random values\n");
 	printf("-wuninit\n");
 	printf("\tPrints warning to stdout if uninitialized RAM is accessed\n");
+	printf("-memorystats <file.txt>\n");
+	printf("\tSaves memory access statistics to the given file when emulator exits\n");
 	printf("-dump {C|R|B|V}...\n");
 	printf("\tConfigure system dump: (C)PU, (R)AM, (B)anked-RAM, (V)RAM\n");
 	printf("\tMultiple characters are possible, e.g. -dump CV ; Default: RB\n");
@@ -518,6 +543,16 @@ usage()
 	printf("\tSuppress warning emitted when encountering a Rockwell extension on the 65C02\n");
 	printf("-longpwron\n");
 	printf("\tSimulate a long press of the power button at system power-on.\n");
+	printf("-midicard [<address>]\n");
+	printf("\tInstall a serial MIDI card at the specified address, or at $9F60 by default.\n");
+	printf("\tThe -sf2 option must be specified along with this option.\n");
+	printf("-sf2 <SoundFont filename>\n");
+	printf("\tInitialize MIDI synth with the specified SoundFont.\n");
+	printf("\tThe -midicard option must be specified along with this option.\n");
+	printf("-midi-in\n");
+	printf("\tConnect the system MIDI input devices to the input of the first UART\n");
+	printf("\tof the emulated MIDI card. The -midicard option is required for this\n");
+	printf("\toption to have any effect.\n");
 #ifdef TRACE
 	printf("-trace [<address>]\n");
 	printf("\tPrint instruction trace. Optionally, a trigger address\n");
@@ -539,6 +574,36 @@ usage_keymap()
 	exit(1);
 }
 
+void no_fluidsynth_warning(void)
+{
+	static bool already_warned;
+
+	if (!already_warned) {
+		fprintf(stderr, "\nWarning: x16emu was built without FluidSynth support,\n");
+		fprintf(stderr, "so the MIDI synth will be inoperative.\n\n");
+#if defined(__linux__)
+		fprintf(stderr, "To build x16emu with fluidsynth support, you distro may\n");
+		fprintf(stderr, "have a libfluidsynth-dev or fluidsynth-devel package that\n");
+		fprintf(stderr, "needs to be installed before building x16emu.\n\n");
+#elif defined(__APPLE__)
+		fprintf(stderr, "To build x16emu with fluidsynth support,\n");
+		fprintf(stderr, "install the homebrew package fluid-synth before\n");
+		fprintf(stderr, "building x16emu.\n\n");
+#elif defined(_WIN64)
+		fprintf(stderr, "To build x16emu with fluidsynth support under MSYS2,\n");
+		fprintf(stderr, "install the mingw-w64-x86_64-fluidsynth package before\n");
+		fprintf(stderr, "building x16emu.\n\n");
+#elif defined(_WIN32)
+		fprintf(stderr, "To build x16emu with fluidsynth support under MSYS2,\n");
+		fprintf(stderr, "install the mingw-w64-i686-fluidsynth package before\n");
+		fprintf(stderr, "building x16emu.\n\n");
+#endif
+		fprintf(stderr, "Then build x16emu with FLUIDSYNTH=1. For example:\n");
+		fprintf(stderr, "FLUIDSYNTH=1 make\n");
+		already_warned = true;
+	}
+}
+
 int
 main(int argc, char **argv)
 {
@@ -548,6 +613,7 @@ main(int argc, char **argv)
 	char *rom_path = rom_path_data;
 	char *prg_path = NULL;
 	char *bas_path = NULL;
+	char *sf2_path = NULL;
 	char *sdcard_path = NULL;
 	bool run_test = false;
 	int test_number = 0;
@@ -622,6 +688,40 @@ main(int argc, char **argv)
 			prg_path = argv[0];
 			argc--;
 			argv++;
+		} else if (!strcmp(argv[0], "-midicard")) {
+#ifndef HAS_FLUIDSYNTH
+			no_fluidsynth_warning();
+#endif
+			argc--;
+			argv++;
+			has_midi_card = true;
+			if (argc && argv[0][0] != '-') {
+				midi_card_addr = 0x9f00 | ((uint16_t)strtol(argv[0], NULL, 16) & 0xff);
+				midi_card_addr &= 0xfff0;
+				argc--;
+				argv++;
+			} else {
+				midi_card_addr = 0x9f60;
+			}
+		} else if (!strcmp(argv[0], "-sf2")) {
+#ifndef HAS_FLUIDSYNTH
+			no_fluidsynth_warning();
+#endif
+			argc--;
+			argv++;
+			if (!argc || argv[0][0] == '-') {
+				usage();
+			}
+			sf2_path = argv[0];
+			argc--;
+			argv++;
+		} else if (!strcmp(argv[0], "-midi-in")) {
+#ifndef HAS_FLUIDSYNTH
+			no_fluidsynth_warning();
+#endif
+			argc--;
+			argv++;
+			fs_midi_in_connect = true;
 		} else if (!strcmp(argv[0], "-run")) {
 			argc--;
 			argv++;
@@ -812,6 +912,15 @@ main(int argc, char **argv)
 			argc--;
 			argv++;
 			memory_report_uninitialized_access(true);
+		} else if (!strcmp(argv[0], "-memorystats")) {
+			argc--;
+			argv++;
+			if (!argc || argv[0][0] == '-') {
+				usage();
+			}
+			memory_report_usage_statistics(argv[0]);
+			argv++;
+			argc--;
 		} else if (!strcmp(argv[0], "-joy1")) {
 			argc--;
 			argv++;
@@ -1018,23 +1127,24 @@ main(int argc, char **argv)
 			argc--;
 			argv++;
 			enable_midline = true;
-		} else if (!strcmp(argv[0], "-enable-ym2151-irq")) {
-			 argc--;
-			 argv++;
-			 ym2151_irq_support = true;
-		} else if (!strcmp(argv[0], "-c816")) {
-			 argc--;
-			 argv++;
-			 regs.is65c816 = true;
-		} else if (!strcmp(argv[0], "-c02")) {
-			 argc--;
-			 argv++;
-			 regs.is65c816 = false;
-		} else if (!strcmp(argv[0], "-rockwell")) {
-			 argc--;
-			 argv++;
-			 warn_rockwell = false;
 		} else if (!strcmp(argv[0], "-remote-debugger")) {
+			argc--;
+			argv++;
+			ym2151_irq_support = true;
+		} else if (!strcmp(argv[0], "-c816")){
+			argc--;
+			argv++;
+			regs.is65c816 = true;
+		} else if (!strcmp(argv[0], "-c02")){
+			argc--;
+			argv++;
+			regs.is65c816 = false;
+		} else if (!strcmp(argv[0], "-rockwell")){
+			argc--;
+			argv++;
+			warn_rockwell = false;
+		}
+		else if (!strcmp(argv[0], "-remote-debugger")) {
 			argc--;
 			argv++;
 			remote_debugger = true;
@@ -1073,6 +1183,18 @@ main(int argc, char **argv)
 #else
 		audio_buffers = 32;
 #endif
+	}
+
+	if (sf2_path && has_midi_card) {
+		if (midi_card_addr < 0x9f60) {
+			fprintf(stderr, "Warning: Serial MIDI card address must be in the range of 9F60-9FF0\n");
+		} else {
+			midi_init();
+			midi_load_sf2((uint8_t *)sf2_path);
+		}
+	} else if (sf2_path || has_midi_card) {
+		fprintf(stderr, "Warning: -sf2 and -midicard must be specified together in order to enable the MIDI synth.\n");
+		has_midi_card = false;
 	}
 
 	if (cartridge_path) {
@@ -1173,6 +1295,7 @@ main(int argc, char **argv)
 #endif
 
 	main_shutdown();
+	memory_dump_usage_counts();
 	return 0;
 }
 
@@ -1234,29 +1357,29 @@ set_kernal_status(uint8_t s)
 	// from it.
 
 	// JMP in the KERNAL API vectors
-	if (read6502(0xffb7) != 0x4c) {
+	if (debug_read6502(0xffb7, 0) != 0x4c) {
 		return false;
 	}
 	// target of KERNAL API vector JMP
-	uint16_t readst = read6502(0xffb8) | read6502(0xffb9) << 8;
+	uint16_t readst = debug_read6502(0xffb8, 0) | debug_read6502(0xffb9, 0) << 8;
 	if (readst < 0xc000) {
 		return false;
 	}
 	// ad 89 02 lda $0289
-	if (read6502(readst) != 0xad) {
+	if (debug_read6502(readst, 0) != 0xad) {
 		return false;
 	}
 	// ad 89 02 lda $0289
-	if (read6502(readst + 3) != 0x0d) {
+	if (debug_read6502(readst + 3, 0) != 0x0d) {
 		return false;
 	}
 	// ad 89 02 lda $0289
-	if (read6502(readst + 6) != 0x8d) {
+	if (debug_read6502(readst + 6, 0) != 0x8d) {
 		return false;
 	}
-	uint16_t status0 = read6502(readst+1) | read6502(readst+2) << 8;
-	uint16_t status1 = read6502(readst+4) | read6502(readst+5) << 8;
-	uint16_t status2 = read6502(readst+7) | read6502(readst+8) << 8;
+	uint16_t status0 = debug_read6502(readst+1, 0) | debug_read6502(readst+2, 0) << 8;
+	uint16_t status1 = debug_read6502(readst+4, 0) | debug_read6502(readst+5, 0) << 8;
+	uint16_t status2 = debug_read6502(readst+7, 0) | debug_read6502(readst+8, 0) << 8;
 	// all three addresses must be the same
 	if (status0 != status1 || status0 != status2) {
 		return false;
@@ -1283,7 +1406,7 @@ handle_ieee_intercept()
 		// do high-level KERNAL IEEE API interception
 		return false;
 	}
-	
+
 	if (sdcard_attached && !prg_file && !using_hostfs) {
 		// if should emulate an SD card (and don't need to
 		// hack a PRG into RAM), we skip HostFS if it uses unit 8
@@ -1413,9 +1536,9 @@ handle_ieee_intercept()
 		}
 
 		increment_wrap_at_page_boundary(&regs.sp);
-		uint8_t low = read6502(regs.sp);
+		uint8_t low = debug_read6502(regs.sp, USE_CURRENT_BANK);
 		increment_wrap_at_page_boundary(&regs.sp);
-		regs.pc = ((read6502(regs.sp) << 8) | low) + 1;
+		regs.pc = ((debug_read6502(regs.sp, USE_CURRENT_BANK) << 8) | low) + 1;
 	}
 	return handled;
 }
@@ -1517,9 +1640,9 @@ emulator_loop(void *param)
 			printf(":.,%04x ", regs.pc);
 
 			char disasm_line[15];
-			int len = disasm(regs.pc, RAM, disasm_line, sizeof(disasm_line), false, 0, regs.status, &eff_addr);
+			int len = disasm(regs.pc, RAM, disasm_line, sizeof(disasm_line), -1, regs.status, &eff_addr);
 			for (int i = 0; i < len; i++) {
-				printf("%02x ", read6502(regs.pc + i));
+				printf("%02x ", debug_read6502(regs.pc + i, USE_CURRENT_BANK));
 			}
 			for (int i = 0; i < 9 - 3 * len; i++) {
 				printf(" ");
@@ -1575,7 +1698,7 @@ emulator_loop(void *param)
 		old_clockticks6502 = clockticks6502;
 		bool new_frame = false;
 		via1_step(clocks);
-		vera_spi_step(clocks);
+		vera_spi_step(MHZ, clocks);
 		if (has_serial) {
 			serial_step(clocks);
 		}
@@ -1594,6 +1717,8 @@ emulator_loop(void *param)
 		if (!headless) {
 			audio_step(clocks);
 		}
+
+		midi_serial_step(clocks);
 
 		if (!headless && new_frame) {
 			if (nvram_dirty && nvram_path) {
@@ -1616,14 +1741,14 @@ emulator_loop(void *param)
 #endif
 		}
 
-		// The optimization from the opportunistic batching of audio rendering 
+		// The optimization from the opportunistic batching of audio rendering
 		// is lost if we need to track the YM2151 IRQ, so it has been made a
 		// command-line switch that's disabled by default.
 		if (ym2151_irq_support) {
 			audio_render();
 		}
 
-		if (video_get_irq_out() || via1_irq() || (has_via2 && via2_irq()) || (ym2151_irq_support && YM_irq())) {
+		if (video_get_irq_out() || via1_irq() || (has_via2 && via2_irq()) || (ym2151_irq_support && YM_irq()) || (has_midi_card && midi_serial_irq())) {
 //			printf("IRQ!\n");
 			irq6502();
 		}
@@ -1677,21 +1802,22 @@ emulator_loop(void *param)
 				static bool prg_done = false;
 
 				if (prg_file && !prg_done) {
+					int loadlen = 0;
 					// LOAD":*" will cause the IEEE library
 					// to load from "prg_file"
 					if (prg_override_start >= 0) {
-						snprintf(paste_text_data, sizeof(paste_text_data), "LOAD\":*\",%d,1,$%04X\r", ieee_unit, prg_override_start);
+						loadlen = snprintf(paste_text_data, sizeof(paste_text_data), "LOAD\":*\",%d,1,$%04X\r", ieee_unit, prg_override_start);
 					} else {
-						snprintf(paste_text_data, sizeof(paste_text_data), "LOAD\":*\",%d,1\r", ieee_unit);
+						loadlen = snprintf(paste_text_data, sizeof(paste_text_data), "LOAD\":*\",%d,1\r", ieee_unit);
 					}
 					paste_text = paste_text_data;
 					prg_done = true;
 
 					if (run_after_load) {
 						if (prg_override_start >= 0) {
-							snprintf(strchr(paste_text_data, 0), sizeof(paste_text_data), "SYS$%04X\r", prg_override_start);
+							snprintf(paste_text_data + loadlen, sizeof(paste_text_data) - loadlen, "SYS$%04X\r", prg_override_start);
 						} else {
-							snprintf(strchr(paste_text_data, 0), sizeof(paste_text_data), "RUN\r");
+							snprintf(paste_text_data + loadlen, sizeof(paste_text_data) - loadlen, "RUN\r");
 						}
 					}
 				}

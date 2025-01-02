@@ -506,6 +506,9 @@ static void plp() {
     regs.status = pull8();
     if (regs.e) {
         regs.status |= FLAG_INDEX_WIDTH | FLAG_MEMORY_WIDTH;
+    } else if (regs.status & FLAG_INDEX_WIDTH) {
+        regs.xh = 0;
+        regs.yh = 0;
     }
 }
 
@@ -549,6 +552,10 @@ static void rti() {
     if (regs.e) {
         regs.status |= FLAG_INDEX_WIDTH | FLAG_MEMORY_WIDTH;
     } else {
+        if (regs.status & FLAG_INDEX_WIDTH) {
+            regs.xh = 0;
+            regs.yh = 0;
+        }
         regs.k = pull8();
     }
 }
@@ -822,27 +829,23 @@ static void tsc() {
 }
 
 static void mvn() {
-    if (regs.c != 0xFFFF) {
-        if (index_16bit()) {
-            write6502(regs.y++, read6502(regs.x++));
-        } else {
-            write6502(regs.yl++, read6502(regs.xl++));
-        }
-
-        regs.c--;
+    if (index_16bit()) {
+        write6502(regs.y++, read6502(regs.x++));
+    } else {
+        write6502(regs.yl++, read6502(regs.xl++));
+    }
+    if (--regs.c != 0xFFFF) {
         regs.pc -= 3;
     }
 }
 
 static void mvp() {
-    if (regs.c != 0xFFFF) {
-        if (index_16bit()) {
-            write6502(regs.y--, read6502(regs.x--));
-        } else {
-            write6502(regs.yl--, read6502(regs.xl--));
-        }
-
-        regs.c--;
+    if (index_16bit()) {
+        write6502(regs.y--, read6502(regs.x--));
+    } else {
+        write6502(regs.yl--, read6502(regs.xl--));
+    }
+    if (--regs.c != 0xFFFF) {
         regs.pc -= 3;
     }
 }

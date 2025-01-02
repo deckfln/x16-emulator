@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "memory.h"
 #include "cpu/fake6502.h"
 #include "glue.h"
@@ -302,7 +303,7 @@ void testbench_init()
                 if (iaddr == -1) {
                     invalid();
                 } else {
-                    printf("%lx\n", (long)read6502((uint16_t)iaddr));
+                    printf("%lx\n", (long)debug_read6502((uint16_t)iaddr, USE_CURRENT_BANK));
                     fflush(stdout);
                 }
             }

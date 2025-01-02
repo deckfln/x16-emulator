@@ -62,10 +62,10 @@ bool log_ieee = false;
 
 bool ieee_initialized_once = false;
 
-uint8_t error[80];
+uint8_t error[256];
 int error_len = 0;
 int error_pos = 0;
-uint8_t cmd[80];
+uint8_t cmd[256];
 int cmdlen = 0;
 int namelen = 0;
 int channel = 0;
@@ -122,10 +122,15 @@ realpath(const char *path, char *resolved_path) {
 
 #define u8strchr(A,B) (uint8_t *)strchr((char *)A,B)
 #define u8strrchr(A,B) (uint8_t *)strrchr((char *)A,B)
+#ifdef _MSC_VER
+#	define u8strcpy(A, B, C) strcpy_s((char *)A, C, (char *)B)
+#	define u8strncpy(A, B, C) strncpy_s((char *)A, C, (char *)B, C)
+#else
 #define u8strcpy(A,B) strcpy((char *)A,(char *)B)
+#define u8strncpy(A, B, C) strncpy((char *)A, (char *)B, C)
+#endif
 #define u8strcmp(A,B) strcmp((char *)A,(char *)B)
 #define u8strncmp(A,B,C) strncmp((char *)A,(char *)B,C)
-#define u8strncpy(A,B,C) strncpy((char *)A,(char *)B,C)
 #define u8strlen(A) strlen((char *)A)
 #define u8stat(A,B) stat((char *)A,B)
 #define u8realpath(A,B) (uint8_t *)realpath((char *)A,(char *)B)
@@ -138,6 +143,7 @@ static void set_error(int e, int t, int s);
 static void cchdir(uint8_t *dir);
 static int cgetcwd(uint8_t *buf, size_t len);
 static void cseek(int channel, uint32_t pos);
+static void ctell(int channel);
 static void cmkdir(uint8_t *dir);
 static void crmdir(uint8_t *dir);
 static void cunlink(uint8_t *f);
@@ -174,7 +180,7 @@ utf8_to_iso_string(uint8_t *dst, const uint8_t *src)
 	// longer than the string (IOW, 4 terminating nulls)
 	uint8_t *s = malloc(u8strlen(src)+4);
 	memset(s, 0, u8strlen(src)+4);
-	u8strcpy(s, src);
+	u8strcpy(s, src, u8strlen(src) + 4);
 
 	uint8_t *so = s;
 
@@ -274,7 +280,7 @@ utf8_to_codepoint(uint8_t *str, int *off)
 	// longer than the string (IOW, 4 terminating nulls)
 	uint8_t *s = malloc(u8strlen(str+(*off))+4);
 	memset(s, 0, u8strlen(str+(*off))+4);
-	u8strcpy(s, str+(*off));
+	u8strcpy(s, str + (*off), u8strlen(str + (*off)) + 4);
 	
 	uint8_t *so = utf8_decode(s, &cp, &e);
 
@@ -378,10 +384,10 @@ parse_dos_filename(const uint8_t *name, bool dirhandling)
 			}
 		}
 
-		u8strcpy(newname+j,name_ptr);
+		u8strcpy(newname + j, name_ptr, u8strlen(name));
 
 	} else {
-		u8strcpy(newname,name);
+		u8strcpy(newname, name, u8strlen(name));
 	}
 
 	return newname;
@@ -418,16 +424,16 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 	// slash(es) and all, otherwise append it to the cwd, but with a /
 	// in between
 	if (name[0] == '/' || name[0] == '\\') { // absolute
-		u8strcpy(tmp, fsroot_path);
-		u8strcpy(tmp+u8strlen(fsroot_path), name);
+		u8strcpy(tmp, fsroot_path, u8strlen(name) + u8strlen(hostfscwd) + 2);
+		u8strcpy(tmp + u8strlen(fsroot_path), name, u8strlen(name) + u8strlen(hostfscwd) + 2);
 	} else { // relative
-		u8strcpy(tmp, hostfscwd);
+		u8strcpy(tmp, hostfscwd, u8strlen(name) + u8strlen(hostfscwd) + 2);
 		tmp[u8strlen(hostfscwd)] = '/';
-		u8strcpy(tmp+u8strlen(hostfscwd)+1, name);
+		u8strcpy(tmp + u8strlen(hostfscwd) + 1, name, u8strlen(name) + u8strlen(hostfscwd) + 2);
 	}
 
 	// keep the original parsed name
-	u8strcpy(tmp2, tmp);
+	u8strcpy(tmp2, tmp, u8strlen(name) + u8strlen(hostfscwd) + 2);
 
 	if (u8strchr(tmp,'*') || u8strchr(tmp,'?')) { // oh goodie, a wildcard
 		has_wildcard_chars = true;
@@ -513,9 +519,9 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 				set_error(0x70, 0, 0);
 				return NULL;
 			}
-			u8strcpy(ret, tmp);
+			u8strcpy(ret, tmp, u8strlen(tmp) + u8strlen(dp->d_name) + 2);
 			ret[u8strlen(tmp)] = '/';
-			u8strcpy(ret+u8strlen(tmp)+1, dp->d_name);
+			u8strcpy(ret + u8strlen(tmp) + 1, dp->d_name, u8strlen(tmp) + u8strlen(dp->d_name) + 2);
 			if (wildcard_filetype) {
 				u8stat(ret, &st);
 				// in a wildcard match where the filetype is wrong, mark as not found
@@ -567,7 +573,7 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 				set_error(0x70, 0, 0);
 				return NULL;
 			}
-			u8strcpy(tmp, name);
+			u8strcpy(tmp, name, u8strlen(name) + 1);
 			c = u8strrchr(tmp, '/');
 			d = u8strrchr(tmp, '\\');
 			if (c > d) {
@@ -586,16 +592,16 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 			}
 
 			if (name[0] == '/' || name[0] == '\\') { // absolute
-				u8strcpy(ret, fsroot_path);
+				u8strcpy(ret, fsroot_path, u8strlen(name) + u8strlen(hostfscwd) + 2);
 				if (c == tmp) { // leading slash was the only slash
 					*tmp = name[0];
 					c = NULL;
 				}
-				u8strcpy(ret+u8strlen(fsroot_path), tmp);
+				u8strcpy(ret + u8strlen(fsroot_path), tmp, u8strlen(name) + u8strlen(hostfscwd) + 2);
 			} else { // relative
-				u8strcpy(ret, hostfscwd);
+				u8strcpy(ret, hostfscwd, u8strlen(name) + u8strlen(hostfscwd) + 2);
 				*(ret+u8strlen(hostfscwd)) = '/';
-				u8strcpy(ret+u8strlen(hostfscwd)+1, tmp);
+				u8strcpy(ret + u8strlen(hostfscwd) + 1, tmp, u8strlen(name) + u8strlen(hostfscwd) + 2);
 			}
 
 			free(tmp);
@@ -618,9 +624,9 @@ resolve_path_utf8(const uint8_t *name, bool must_exist, int wildcard_filetype)
 						set_error(0x70, 0, 0);
 						return NULL;
 					}
-					u8strcpy(ret, hostfscwd);
+					u8strcpy(ret, hostfscwd, u8strlen(name) + u8strlen(hostfscwd) + 2);
 					ret[u8strlen(hostfscwd)] = '/';
-					u8strcpy(ret+u8strlen(hostfscwd)+1, name);
+					u8strcpy(ret + u8strlen(hostfscwd) + 1, name, u8strlen(name) + u8strlen(hostfscwd) + 2);
 				}
 			}
 		}
@@ -787,9 +793,9 @@ continue_directory_listing(uint8_t *data)
 			size_t nl = u8strlen(dp->d_name);
 			size_t pl = u8strlen(hostfscwd);
 			uint8_t *tn = malloc(nl+pl+3);
-			u8strcpy(tn, hostfscwd);
+			u8strcpy(tn, hostfscwd, nl+pl+3);
 			*(tn+pl) = '/';
-			u8strcpy(tn+pl+1, dp->d_name);
+			u8strcpy(tn+pl+1, dp->d_name, nl+3);
 			u8stat(tn, &st);
 			free(tn);
 
@@ -1006,7 +1012,7 @@ create_cwd_listing(uint8_t *data)
 	}
 	int i = u8strlen(hostfscwd);
 	int j = u8strlen(fsroot_path);
-	u8strcpy(tmp,hostfscwd);
+	u8strcpy(tmp, hostfscwd, u8strlen(hostfscwd) + 1);
 
 	for(; i>= j-1; --i) {
 		// find the beginning of a path element
@@ -1016,7 +1022,7 @@ create_cwd_listing(uint8_t *data)
 		tmp[i-1]=0;
 
 		if (i < j) {
-			u8strcpy(tmp+i,"/");
+			u8strcpy(tmp + i, "/", u8strlen(hostfscwd) + 1);
 		}
 
 		file_size = 0;
@@ -1079,7 +1085,7 @@ create_cwd_listing(uint8_t *data)
 
 
 
-static char*
+static const char*
 error_string(int e)
 {
 	switch(e) {
@@ -1150,9 +1156,9 @@ set_activity(bool active)
 }
 
 static void
-set_error(int e, int t, int s)
+set_error_text(int e, const char *text, int t, int s)
 {
-	snprintf((char *)error, sizeof(error), "%02x,%s,%02d,%02d\r", e, error_string(e), t, s);
+	snprintf((char *)error, sizeof(error), "%02x,%s,%02d,%02d\r", e, text, t, s);
 	error_len = u8strlen(error);
 	error_pos = 0;
 	uint8_t cbdos_flags = get_kernal_cbdos_flags();
@@ -1162,6 +1168,12 @@ set_error(int e, int t, int s)
 		cbdos_flags |= 0x20; // set error flag
 	}
 	set_kernal_cbdos_flags(cbdos_flags);
+}
+
+static void
+set_error(int e, int t, int s)
+{
+	set_error_text(e, error_string(e), t, s);
 }
 
 static void
@@ -1243,6 +1255,9 @@ command(uint8_t *cmd)
 					cunlink(cmd); // Need to parse out the arg in this function
 					return;
 			}	
+		case 'T': // Tell
+			ctell(cmd[1]);
+			return;
 		case 'U':
 			switch(cmd[1]) {
 				case 'I': // UI: Reset
@@ -1364,7 +1379,7 @@ crename(uint8_t *f)
 		set_error(0x70, 0, 0);
 		return;
 	}
-	u8strcpy(tmp,f);
+	u8strcpy(tmp, f, u8strlen(f) + 1);
 	uint8_t *d = u8strchr(tmp,':');
 
 	if (d == NULL) {
@@ -1476,7 +1491,7 @@ cunlink(uint8_t *f)
 		set_error(0x70, 0, 0);
 		return;
 	}
-	u8strcpy(tmp,f);
+	u8strcpy(tmp, f, u8strlen(f) + 1);
 	uint8_t *fn = u8strchr(tmp,':');
 
 	if (fn == NULL) {
@@ -1650,6 +1665,34 @@ cseek(int channel, uint32_t pos)
 
 	if (channels[channel].f) {
 		SDL_RWseek(channels[channel].f, pos, RW_SEEK_SET);
+	} else {
+		set_error(0x70, 0, 0);
+	}
+}
+
+static void
+ctell(int channel)
+{
+	char buf[32];
+
+	if (channel == 15) {
+		set_error(0x30, 0, 0);
+		return;
+	}
+
+	if (channels[channel].f) {
+		uint64_t pos = SDL_RWtell(channels[channel].f);
+		uint64_t siz = SDL_RWsize(channels[channel].f);
+		if (pos > 0xffffffffULL) {
+			pos = 0xffffffff;
+		}
+		if (siz > 0xffffffffULL) {
+			siz = 0xffffffff;
+		}
+		snprintf((char *)buf, sizeof(buf), "%08X %08X", (uint32_t)pos, (uint32_t)siz);
+		set_error_text(0x07, buf, 0, 0);
+	} else {
+		set_error(0x70, 0, 0);
 	}
 }
 
@@ -1722,22 +1765,22 @@ ieee_init()
 		fprintf(stderr, "Failed to allocate memory for hostfscwd\n");
 		exit(1);
 	}
-	u8strcpy(hostfscwd, startin_path);
+	u8strcpy(hostfscwd, startin_path, u8strlen(startin_path) + 1);
 
 	// Locate and remember cbdos_flags variable address in KERNAL vars
 	{
 		// check JMP instruction at ACPTR API
-		if (real_read6502(0xffa5, true, 0) != 0x4c) goto fail;
+		if (debug_read6502(0xffa5, 0) != 0x4c) goto fail;
 
 		// get address of ACPTR routine
-		uint16_t kacptr = real_read6502(0xffa6, true, 0) | real_read6502(0xffa7, true, 0) << 8;
+		uint16_t kacptr = debug_read6502(0xffa6, 0) | debug_read6502(0xffa7, 0) << 8;
 		if (kacptr < 0xc000) goto fail;
 
 		// first instruction is BIT cbdos_flags
-		if (real_read6502(kacptr, true, 0) != 0x2c) goto fail;
+		if (debug_read6502(kacptr, 0) != 0x2c) goto fail;
 
 		// get the address of cbdos_flags
-		cbdos_flags = real_read6502(kacptr+1, true, 0) | real_read6502(kacptr+2, true, 0) << 8;
+		cbdos_flags = debug_read6502(kacptr+1, 0) | debug_read6502(kacptr+2, 0) << 8;
 
 		if (cbdos_flags < 0x0200 || cbdos_flags >= 0x0400) goto fail;
 		goto success;
@@ -1839,7 +1882,7 @@ ACPTR(uint8_t *a)
 					// We need to send EOI on the last byte of the file.
 					// We have to check every time since CMDR-DOS
 					// supports random access R/W mode
-					
+
 					Sint64 curpos = SDL_RWtell(channels[channel].f);
 					if (curpos == SDL_RWseek(channels[channel].f, 0, RW_SEEK_END)) {
 						ret = 0x40;
@@ -1875,9 +1918,9 @@ CIOUT(uint8_t a)
 			}
 		} else {
 			if (channel == 15) {
-				// P command takes binary parameters, so we can't terminate
+				// P/T commands take binary parameters, so we can't terminate
 				// the command on CR.
-				if ((a == 13) && (cmd[0] != 'P')) {
+				if ((a == 13) && (cmd[0] != 'P' && cmd[0] != 'T')) {
 					cmd[cmdlen] = 0;
 					command(cmd);
 					cmdlen = 0;
@@ -1973,7 +2016,7 @@ MACPTR(uint16_t addr, uint16_t *c, uint8_t stream_mode)
 {
 	if (talking) {
 		int ret = 0;
-		int     count    = *c ? (*c)  : 256;
+		int count = *c ? 0 : 256;
 		uint8_t ram_bank = read6502(0);
 		int i = 0;
 		if (channels[channel].f) {
@@ -2007,35 +2050,31 @@ MACPTR(uint16_t addr, uint16_t *c, uint8_t stream_mode)
 int
 MCIOUT(uint16_t addr, uint16_t *c, uint8_t stream_mode)
 {
-	if (listening) {
-		int ret = 0;
-		int     count    = *c ? (*c)  : 256;
-		uint8_t ram_bank = read6502(0);
-		int i = 0;
-		if (channels[channel].f && channels[channel].write) {
-			do {
-				uint8_t byte;
-				byte = read6502(addr);
-				i++;
-				if (!stream_mode) {
-					addr++;
-					if (addr == 0xc000) {
-						addr = 0xa000;
-						ram_bank++;
-						write6502(0, ram_bank);
-					}
+	int ret = 0;
+	int count = *c ? 0: 256;
+	uint8_t ram_bank = read6502(0);
+	int i = 0;
+	if (channels[channel].f && channels[channel].write) {
+		do {
+			uint8_t byte;
+			byte = read6502(addr);
+			i++;
+			if (!stream_mode) {
+				addr++;
+				if (addr == 0xc000) {
+					addr = 0xa000;
+					ram_bank++;
+					write6502(0, ram_bank);
 				}
-				ret = CIOUT(byte);
-				if (ret) {
-					break;
-				}
-			} while(i < count);
-		} else {
-			ret = -3; // unsupported
-		}
-		*c = i;
-		return ret;
+			}
+			ret = CIOUT(byte);
+			if (ret) {
+				break;
+			}
+		} while(i < count);
 	} else {
-		return -2; // not us, do not handle
+		ret = -2;
 	}
+	*c = i;
+	return ret;
 }

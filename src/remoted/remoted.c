@@ -31,7 +31,10 @@ char *_strdup(const char *s) {
 #include "../memory.h"
 #include "../debugger.h"
 #include "../glue.h"
+#include "../cpu/fake6502.h"
 #include "../cpu/registers.h"
+
+extern struct regs regs;
 
 //-----------------------------------------------------------
 //   private functions

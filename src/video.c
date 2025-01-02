@@ -365,6 +365,11 @@ video_init(int window_scale, float screen_x_scale, char *quality, bool fullscree
 
 	SDL_SetWindowOpacity(window, opacity);
 
+#ifdef _WIN32
+	extern void video_win32_set_rounded_corners(SDL_Window *window);
+	video_win32_set_rounded_corners(window);
+#endif
+
 	if (record_gif != RECORD_GIF_DISABLED) {
 		if (!strcmp(gif_path+strlen(gif_path)-5, ",wait")) {
 			// wait for POKE
@@ -841,8 +846,8 @@ render_layer_line_tile(uint8_t layer, uint16_t y)
 	const int     eff_y               = calc_layer_eff_y(props0, y);
 	const uint8_t yy                  = eff_y & props->tileh_max;
 	const uint8_t yy_flip             = yy ^ props->tileh_max;
-	const uint32_t y_add              = (yy << (props->tilew_log2 + props->color_depth - 3));
-	const uint32_t y_add_flip         = (yy_flip << (props->tilew_log2 + props->color_depth - 3));
+	const uint32_t y_add              = (yy << ((props->tilew_log2 + props->color_depth - 3) & 31));
+	const uint32_t y_add_flip         = (yy_flip << ((props->tilew_log2 + props->color_depth - 3) & 31));
 
 	const uint32_t map_addr_begin = calc_layer_map_addr_base2(props, props->min_eff_x, eff_y);
 	const uint32_t map_addr_end   = calc_layer_map_addr_base2(props, props->max_eff_x, eff_y);
@@ -1548,7 +1553,7 @@ uint32_t
 video_get_address(uint8_t sel)
 {
 	uint32_t address = io_addr[sel];
-	return address;
+	return address & 0x1ffff;
 }
 
 uint32_t
@@ -2183,8 +2188,10 @@ void video_write(uint8_t reg, uint8_t value) {
 					fx_x_pixel_increment = ((((reg_composer[0x0d] & 0x7f) << 15) + (reg_composer[0x0c] << 7)) // base value
 						| ((reg_composer[0x0d] & 0x40) ? 0xffc00000 : 0)) // sign extend if negative
 						<< 5*(!!(reg_composer[0x0d] & 0x80)); // multiply by 32 if flag set
-					// Reset subpixel to 0.5
-					fx_x_pixel_position = (fx_x_pixel_position & 0x07ff0000) | 0x00008000;
+					if (fx_addr1_mode == 1 || fx_addr1_mode == 2) {
+						// Reset subpixel to 0.5
+						fx_x_pixel_position = (fx_x_pixel_position & 0x07ff0000) | 0x00008000;
+					}
 					break;
 				case 0x0e: // DCSEL=3, $9F2B
 					fx_y_pixel_increment = ((((reg_composer[0x0f] & 0x7f) << 15) + (reg_composer[0x0e] << 7)) // base value
@@ -2195,8 +2202,10 @@ void video_write(uint8_t reg, uint8_t value) {
 					fx_y_pixel_increment = ((((reg_composer[0x0f] & 0x7f) << 15) + (reg_composer[0x0e] << 7)) // base value
 						| ((reg_composer[0x0f] & 0x40) ? 0xffc00000 : 0)) // sign extend if negative
 						<< 5*(!!(reg_composer[0x0f] & 0x80)); // multiply by 32 if flag set
-					// Reset subpixel to 0.5
-					fx_y_pixel_position = (fx_y_pixel_position & 0x07ff0000) | 0x00008000;
+					if (fx_addr1_mode == 1 || fx_addr1_mode == 2) {
+						// Reset subpixel to 0.5
+						fx_y_pixel_position = (fx_y_pixel_position & 0x07ff0000) | 0x00008000;
+					}
 					break;
 				case 0x10: // DCSEL=4, $9F29
 					fx_x_pixel_position = (fx_x_pixel_position & 0x0700ff80) | (value << 16);
