@@ -15,5 +15,6 @@ extern void nmi6502();
 extern uint32_t clockticks6502;
 extern uint8_t waiting;
 extern bool warn_rockwell;
+extern struct regs regs;
 
 #endif

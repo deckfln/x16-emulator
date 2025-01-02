@@ -31,6 +31,7 @@ char *_strdup(const char *s) {
 #include "../memory.h"
 #include "../debugger.h"
 #include "../glue.h"
+#include "../cpu/registers.h"
 
 //-----------------------------------------------------------
 //   private functions
@@ -116,7 +117,7 @@ remoted_emulator(struct MHD_Connection *connection, char **next_token)
 	cJSON *jinBasic = cJSON_CreateNumber(inBasic);
 	cJSON_AddItemToObject(answer, "reachedBasic", jinBasic);
 
-	cJSON *jpc = cJSON_CreateNumber(pc);
+	cJSON *jpc = cJSON_CreateNumber(regs.pc);
 	cJSON_AddItemToObject(answer, "pc", jpc);
 
 	return remoted_json(connection, answer);
@@ -583,7 +584,7 @@ remoted_vera_dump(struct MHD_Connection *connection, char **next_token)
 {
 	char *token = strtok_s(NULL, "/", next_token);
 	static uint8_t *dumpster = NULL;
-	static uint32_t dumpster_l = 0;
+	static size_t dumpster_l = 0;
 
 	if (token != NULL) {
 		uint32_t start = (uint32_t)atoi(token);
@@ -874,11 +875,11 @@ remoted_debug(struct MHD_Connection *connection, char **next_token)
 		else if (strcmp(token, "continue") == 0) {
 			myStatus = CPU_RUN;
 		} else if (strcmp(token, "stepover") == 0) {
-			int bank   = getCurrentBank(pc);
-			int opcode = real_read6502(pc, true, bank); // What opcode is it ?
+			int bank   = getCurrentBank(regs.pc);
+			int opcode = real_read6502(regs.pc, true, bank); // What opcode is it ?
 			if (opcode == 0x20) {                            // Is it JSR ?
-				stepOver.pc   = pc + 3;                // Then break 3 on.
-				stepOver.bank = getCurrentBank(pc);
+				stepOver.pc   = regs.pc + 3;                // Then break 3 on.
+				stepOver.bank = getCurrentBank(regs.pc);
 				stepOver.active = true;
 				timing_init();
 				myStatus = CPU_RUN;
@@ -889,10 +890,10 @@ remoted_debug(struct MHD_Connection *connection, char **next_token)
 		else if (strcmp(token, "stepout") == 0) {
 			// extract PC from the stack
 #define BASE_STACK 0x100
-			uint16_t rts = read6502(BASE_STACK + ((sp + 1) & 0xFF)) | ((uint16_t)read6502(BASE_STACK + ((sp + 2) & 0xFF)) << 8);
+			uint16_t rts = read6502(BASE_STACK + ((regs.sp + 1) & 0xFF)) | ((uint16_t)read6502(BASE_STACK + ((regs.sp + 2) & 0xFF)) << 8);
 			uint16_t nexti = rts + 1;
 			stepOver.pc     = nexti;
-			stepOver.bank   = getCurrentBank(pc);
+			stepOver.bank   = getCurrentBank(regs.pc);
 			stepOver.active = true;
 			timing_init();
 			myStatus = CPU_RUN;
@@ -912,22 +913,22 @@ remoted_debug(struct MHD_Connection *connection, char **next_token)
 static struct MHD_Response *
 remoted_cpu(struct MHD_Connection *connection, char **next_token)
 {
-	int    bank   = getCurrentBank(pc);
+	int    bank   = getCurrentBank(regs.pc);
 
 	cJSON *answer = cJSON_CreateObject();
 	cJSON *jbank = cJSON_CreateNumber(bank);
 	cJSON_AddItemToObject(answer, "bank", jbank);
-	cJSON *jpc = cJSON_CreateNumber(pc);
+	cJSON *jpc = cJSON_CreateNumber(regs.pc);
 	cJSON_AddItemToObject(answer, "pc", jpc);
-	cJSON *jsp = cJSON_CreateNumber(sp);
+	cJSON *jsp = cJSON_CreateNumber(regs.sp);
 	cJSON_AddItemToObject(answer, "sp", jsp);
-	cJSON *ja = cJSON_CreateNumber(a);
+	cJSON *ja = cJSON_CreateNumber(regs.a);
 	cJSON_AddItemToObject(answer, "a", ja);
-	cJSON *jx = cJSON_CreateNumber(x);
+	cJSON *jx = cJSON_CreateNumber(regs.x);
 	cJSON_AddItemToObject(answer, "x", jx);
-	cJSON *jy = cJSON_CreateNumber(y);
+	cJSON *jy = cJSON_CreateNumber(regs.y);
 	cJSON_AddItemToObject(answer, "y", jy);
-	cJSON *jstatus = cJSON_CreateNumber(status);
+	cJSON *jstatus = cJSON_CreateNumber(regs.status);
 	cJSON_AddItemToObject(answer, "flags", jstatus);
 	cJSON *jmyStatus = cJSON_CreateNumber(myStatus);
 	cJSON_AddItemToObject(answer, "myStatus", jmyStatus);
@@ -1086,20 +1087,20 @@ remoted_close(void)
 enum REMOTED_CMD
 remoted_getStatus(void)
 {
-	if (pc == 0x080d) {
+	if (regs.pc == 0x080d) {
 		// leaves basic to tun a PRG
 		inBasic = false;
 	}
 
 	// detect BRK
-	if (read6502(pc) == 00) {
+	if (read6502(regs.pc) == 00) {
 		myStatus = CPU_STOP;
 	}
 
 	// decide how to execute the current instruction
 	if (myStatus == CPU_RESTART) {
-		pc       = _start;
-		sp       = 0xf6;
+		regs.pc       = _start;
+		regs.sp       = 0xf6;
 		myStatus = CPU_RUN;
 	}
 	else if (myStatus == CPU_NEXT) {
@@ -1111,7 +1112,7 @@ remoted_getStatus(void)
 	}
 	else if (myStatus == CPU_RUN) {
 		//TODO get current bank
-		if (hitBreakpoint(pc, 0) || hitWatch()) {
+		if (hitBreakpoint(regs.pc, 0) || hitWatch()) {
 			myStatus = CPU_STOP;
 		}
 	} else {

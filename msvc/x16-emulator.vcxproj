@@ -138,10 +138,12 @@
   <ItemGroup>
     <ClInclude Include="..\src\audio.h" />
     <ClInclude Include="..\src\cartridge.h" />
+    <ClInclude Include="..\src\cpu\65c02.h" />
     <ClInclude Include="..\src\cpu\fake6502.h" />
     <ClInclude Include="..\src\cpu\instructions.h" />
     <ClInclude Include="..\src\cpu\mnemonics.h" />
     <ClInclude Include="..\src\cpu\modes.h" />
+    <ClInclude Include="..\src\cpu\registers.h" />
     <ClInclude Include="..\src\cpu\support.h" />
     <ClInclude Include="..\src\cpu\tables.h" />
     <ClInclude Include="..\src\debugger.h" />

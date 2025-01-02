@@ -192,6 +192,12 @@
     <ClInclude Include="libunistd\portable\Finder.h">
       <Filter>Fichiers d%27en-tête\extern</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\cpu\65c02.h">
+      <Filter>Fichiers d%27en-tête\cpu</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\cpu\registers.h">
+      <Filter>Fichiers d%27en-tête\cpu</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\audio.c">
