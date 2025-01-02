@@ -1,5 +1,5 @@
 #include "ymglue.h"
-#include "ymfm_opm.h"
+#include "extern/ymfm/src/ymfm_opm.h"
 #include <cstdint>
 
 class ym2151_interface : public ymfm::ymfm_interface {

@@ -27,7 +27,7 @@ int textureInitialized = 0;
 //
 char *ltrim(char *s)
 {
-	while(isspace(*s)) s++;
+	while(isspace((unsigned char)*s)) s++;
 	return s;
 }
 
